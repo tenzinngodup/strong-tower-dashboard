@@ -67,9 +67,13 @@ The scripts read from `/opt/data/profiles/strong-tower/.env`:
 
 Both are already in your `.env`. No new secrets are required for Phase 1.
 
-## Validation status (Phase 1)
+## Validation status (Phase 2)
 
-Validated against the 2026-06-19 biweekly report. Numbers match within ±5%:
+- **Phase 1** (data foundation): 4/4 sources return ok. Numbers validated against
+  the 2026-06-19 biweekly report within ±5%. See `data/SCHEMA.md` for full details.
+- **Phase 2** (static page): built and visually verified via headless browser.
+  All 5 sections render with real data, mobile-responsive at 720px and 420px
+  breakpoints, no console errors.
 
 | Metric | Biweekly (Jun 5-19) | Dashboard (Jul 1) | Status |
 |---|---|---|---|
@@ -88,9 +92,28 @@ leads have not yet been moved to Walkthrough/Quoted stages in the CRM.
 
 ## What's next
 
-- Phase 2: Build the static HTML page that renders `kpis.json`
-- Phase 3: Deploy to Cloudflare Pages at `dashboard.strongtowercs.com`
-- Phase 4: Wire up the weekly cron
-- Phase 5: Polish (link from biweekly email, owner walkthrough)
+- **Phase 3:** Deploy to Cloudflare Pages at `dashboard.strongtowercs.com`
+  (connect GitHub repo, add DNS, done)
+- **Phase 4:** Wire up the weekly cron (Monday 7am Pacific) so the dashboard
+  auto-updates
+- **Phase 5:** Polish (link from biweekly email, owner walkthrough)
 
 See the planning notes in the chat history for the full phase breakdown.
+
+## Local preview
+
+```bash
+# Terminal 1: serve the static site
+cd public && python3 -m http.server 8765
+
+# Terminal 2: regenerate data
+python3 scripts/ingest.py
+cp data/kpis.json public/kpis.json
+
+# Browser: open http://localhost:8765/index.html
+```
+
+Or run the smoke test (no server needed — uses file://):
+```bash
+python3 tests/smoke_test.py disk
+```

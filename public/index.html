@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Strong Tower — Executive Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand">
+        <h1>Strong Tower Cleaning Services</h1>
+        <p class="subtitle">Executive Dashboard</p>
+      </div>
+      <div class="data-stamp">
+        <span id="data-stamp-text">Loading…</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============== SECTION 1: HEADLINES ============== -->
+    <section id="headlines" class="card-grid">
+      <div class="kpi-card" id="kpi-pipeline">
+        <div class="kpi-label">Open pipeline</div>
+        <div class="kpi-value" data-field="value">—</div>
+        <div class="kpi-note" data-field="note"></div>
+      </div>
+      <div class="kpi-card" id="kpi-leads">
+        <div class="kpi-label">New leads</div>
+        <div class="kpi-value" data-field="value">—</div>
+        <div class="kpi-note" data-field="note">active in pipeline</div>
+      </div>
+      <div class="kpi-card" id="kpi-winrate">
+        <div class="kpi-label">Win rate</div>
+        <div class="kpi-value" data-field="value">—</div>
+        <div class="kpi-note" data-field="note"></div>
+      </div>
+      <div class="kpi-card" id="kpi-cac">
+        <div class="kpi-label">Blended CAC</div>
+        <div class="kpi-value" data-field="value">—</div>
+        <div class="kpi-note" data-field="note">spend data not yet wired</div>
+      </div>
+    </section>
+
+    <!-- ============== SECTION 2: MARKETING ============== -->
+    <section id="marketing">
+      <h2>Marketing</h2>
+      <div class="marketing-grid">
+        <!-- Cadence -->
+        <div class="card">
+          <h3>Posting cadence (last 7 days)</h3>
+          <div class="cadence-row" id="cadence-instagram">
+            <span class="cadence-channel">Instagram</span>
+            <span class="cadence-count">—</span>
+            <span class="cadence-target">/ —</span>
+            <span class="badge">—</span>
+          </div>
+          <div class="cadence-row" id="cadence-linkedin">
+            <span class="cadence-channel">LinkedIn</span>
+            <span class="cadence-count">—</span>
+            <span class="cadence-target">/ —</span>
+            <span class="badge">—</span>
+          </div>
+          <div class="latest-posts">
+            <div class="latest-post" id="latest-instagram">
+              <span class="latest-label">Latest IG:</span>
+              <a href="#" target="_blank" rel="noopener">—</a>
+            </div>
+            <div class="latest-post" id="latest-linkedin">
+              <span class="latest-label">Latest LinkedIn:</span>
+              <a href="#" target="_blank" rel="noopener">—</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Traffic -->
+        <div class="card">
+          <h3>Site traffic (last 7 days)</h3>
+          <div class="traffic-totals">
+            <div class="traffic-stat">
+              <div class="traffic-num" id="traffic-sessions">—</div>
+              <div class="traffic-label">sessions</div>
+            </div>
+            <div class="traffic-stat">
+              <div class="traffic-num" id="traffic-pageviews">—</div>
+              <div class="traffic-label">pageviews</div>
+            </div>
+          </div>
+          <h4>By source</h4>
+          <div class="source-bars" id="source-bars">
+            <p class="muted">Loading…</p>
+          </div>
+          <h4>Top pages</h4>
+          <ol class="top-pages" id="top-pages">
+            <li class="muted">Loading…</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============== SECTION 3: SALES PIPELINE ============== -->
+    <section id="sales">
+      <h2>Sales pipeline</h2>
+      <div class="card">
+        <div class="funnel" id="funnel">
+          <p class="muted">Loading…</p>
+        </div>
+        <div class="funnel-summary" id="funnel-summary"></div>
+      </div>
+    </section>
+
+    <!-- ============== SECTION 4: CUSTOMER / OPERATIONS ============== -->
+    <section id="customer">
+      <h2>Customer &amp; operations</h2>
+      <div class="card" id="customer-card">
+        <p class="muted">Loading…</p>
+      </div>
+    </section>
+
+    <!-- ============== SECTION 5: ACTION ITEMS ============== -->
+    <section id="actions">
+      <h2>Action items</h2>
+      <div id="actions-list">
+        <p class="muted">Loading…</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Strong Tower Cleaning Services · Portland, OR · <span id="footer-stamp"></span></p>
+    <p class="muted small">Auto-updated weekly from HubSpot, Blotato, Google Analytics, and local lead data.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

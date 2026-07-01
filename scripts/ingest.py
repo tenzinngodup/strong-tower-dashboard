@@ -104,6 +104,11 @@ def main() -> int:
         (DATA_DIR / "snapshot.json").write_text(json.dumps(snapshot, indent=2))
         (DATA_DIR / "kpis.json").write_text(json.dumps(kpis, indent=2))
 
+        # Also copy kpis.json into public/ so the static site can fetch it
+        # from the same origin. (CF Pages serves the public/ directory.)
+        public_kpis = PROJECT_ROOT / "public" / "kpis.json"
+        public_kpis.write_text(json.dumps(kpis, indent=2))
+
     if args.print in ("snapshot", "both"):
         print("=" * 60)
         print("SNAPSHOT (raw inputs)")
