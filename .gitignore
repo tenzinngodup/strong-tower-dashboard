@@ -9,3 +9,7 @@ data/kpis.json
 # this in). They are gitignored so we never commit a stale snapshot to GitHub.
 public/kpis.json
 public/snapshot.json
+# wrangler creates a local state dir; safe to ignore.
+.wrangler/
+# The deploy log lives outside the repo but is a useful artifact.
+dashboard_deploy.log
