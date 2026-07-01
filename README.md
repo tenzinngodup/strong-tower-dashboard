@@ -64,8 +64,24 @@ python3 scripts/ingest.py --dry-run --print kpis
 The scripts read from `/opt/data/profiles/strong-tower/.env`:
 - `COMPOSIO_API_KEY` — for HubSpot + GA4 (MCP)
 - `BLOTATO_API_KEY` — for social posting cadence
+- `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` — for wrangler direct-upload deploys
 
-Both are already in your `.env`. No new secrets are required for Phase 1.
+All are already in your `.env`. No new secrets are required.
+
+## Deployment
+
+Production: `https://strong-tower-dashboard.pages.dev`
+CF Pages project: `57d74733-29fb-458c-843e-f9c3951c2ad2` (account `6267da94e5b26778c479aebcae85de2e`)
+
+Two deploy paths, in order of recommendation:
+
+1. **Direct upload via wrangler** (current cron path — `scripts/refresh_and_deploy.sh`)
+   - Fast (~5s), no GitHub OAuth needed
+   - Cron job: `1223b798d21f` — `strongtower-weekly-dashboard` (Mon 14:00 UTC = 7am Pacific, currently PAUSED)
+
+2. **GitHub auto-deploy** (optional, one-time setup in CF dashboard)
+   - See `RUNBOOK.md` section 7 for setup steps
+   - Once enabled, every `git push origin main` auto-deploys
 
 ## Validation status (Phase 2)
 
@@ -93,12 +109,14 @@ leads have not yet been moved to Walkthrough/Quoted stages in the CRM.
 ## What's next
 
 - **Phase 3:** Deploy to Cloudflare Pages at `dashboard.strongtowercs.com`
-  (connect GitHub repo, add DNS, done)
+  (connect GitHub repo, add DNS, done) — ✅ done at strong-tower-dashboard.pages.dev
 - **Phase 4:** Wire up the weekly cron (Monday 7am Pacific) so the dashboard
-  auto-updates
-- **Phase 5:** Polish (link from biweekly email, owner walkthrough)
+  auto-updates — ✅ done, cron `1223b798d21f` (currently PAUSED)
+- **Phase 5:** Polish (link from biweekly email, owner walkthrough) — ✅ done
 
 See the planning notes in the chat history for the full phase breakdown.
+For operational tasks (rotating secrets, debugging, adding KPIs), see
+[`RUNBOOK.md`](./RUNBOOK.md).
 
 ## Local preview
 
