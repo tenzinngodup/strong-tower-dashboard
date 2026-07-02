@@ -47,7 +47,8 @@ SOURCES = [
     "leads",           # file: scripts/sources/leads.py
     "leads_history",   # file: scripts/sources/leads_history.py  (weekly motion log)
     "gmail",           # file: scripts/sources/gmail.py  (SDR outreach via Composio)
-    "hubspot",
+    "hubspot",         # file: scripts/sources/hubspot.py  (deals)
+    "hubspot_events",  # file: scripts/sources/hubspot_events.py  (calls/meetings/emails)
     "blotato",
     "ga4",
 ]

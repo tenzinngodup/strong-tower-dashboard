@@ -42,6 +42,7 @@ def compute(snapshot: dict) -> dict:
     leads  = snapshot.get("leads") or {}
     lh     = snapshot.get("leads_history") or {}
     hs     = snapshot.get("hubspot") or {}
+    hse    = snapshot.get("hubspot_events") or {}
     bl     = snapshot.get("blotato") or {}
     ga     = snapshot.get("ga4") or {}
     gm     = snapshot.get("gmail") or {}
@@ -148,6 +149,28 @@ def compute(snapshot: dict) -> dict:
         }
     outreach = _safe(_outreach, default={"available": False})
 
+    # ── Section 3.8: Engagement (NEW in v2) ─────────────────────────────
+    # Pulled from hubspot_events.py — call / meeting / email volume in HubSpot.
+    # Answers: "after the SDR touches a lead, do they actually engage?
+    # Are walkthroughs being booked?"
+    def _engagement():
+        if not hse.get("ok"):
+            return {"available": False, "reason": hse.get("error", "hubspot_events not fetched")}
+        out = {
+            "available":    True,
+            "window_days":  hse.get("window_days"),
+            "window_start": hse.get("window_start"),
+            "window_end":   hse.get("window_end"),
+        }
+        for obj_type in ("calls", "meetings", "emails"):
+            data = hse.get(obj_type) or {}
+            out[obj_type] = {
+                "in_window":        data.get("in_window", 0),
+                "per_day":          data.get("per_day", []),
+            }
+        return out
+    engagement = _safe(_engagement, default={"available": False})
+
     # ── Section 4: Customer / operations ────────────────────────────────
     # "Active accounts" + MRR come from HubSpot deals. We don't have that
     # field today, so return a "not available" stub that the dashboard
@@ -215,6 +238,29 @@ def compute(snapshot: dict) -> dict:
                 "source":   "leads_history",
             })
 
+        # Engagement: no walkthroughs/meetings booked in 14d.
+        eng = engagement if isinstance(engagement, dict) else {}
+        if eng.get("available"):
+            meetings_in_window = (eng.get("meetings") or {}).get("in_window", 0) or 0
+            calls_in_window    = (eng.get("calls")    or {}).get("in_window", 0) or 0
+            if meetings_in_window == 0 and calls_in_window > 0:
+                items.append({
+                    "severity": "high",
+                    "title":    "No walkthroughs booked in 14d",
+                    "detail":   f"HubSpot shows {calls_in_window} calls but 0 meetings logged. "
+                                "Either no contacted lead has advanced to a walkthrough, or "
+                                "walkthroughs are happening off-HubSpot (calendar, in person).",
+                    "source":   "hubspot_events",
+                })
+            elif calls_in_window == 0 and (gm.get("totals") or {}).get("sent", 0) > 0:
+                items.append({
+                    "severity": "medium",
+                    "title":    "Outreach sent but no calls logged in 14d",
+                    "detail":   "Gmail shows emails sent but HubSpot shows no calls. "
+                                "Calls may be happening off-HubSpot (personal phone).",
+                    "source":   "hubspot_events",
+                })
+
         # Pipeline: stuck deals — if any active deal is old (we don't have
         # createdate in our HubSpot pull yet, so this is a stub for now).
         # Will be filled in once we add `createdate` to DEAL_PROPERTIES.
@@ -260,6 +306,7 @@ def compute(snapshot: dict) -> dict:
         },
         "funnel_motion": funnel_motion,   # NEW in v2
         "outreach":      outreach,        # NEW in v2
+        "engagement":    engagement,      # NEW in v2
         "customer":  customer,
         "actions":   actions,
     }

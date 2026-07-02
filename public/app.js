@@ -389,6 +389,102 @@
     `;
   }
 
+  // ── Engagement (NEW in v2) ──────────────────────────────────
+  // Renders HubSpot call/meeting/email volume. Tells the owner
+  // whether contacts engage after outreach, and whether walkthroughs
+  // are being booked.
+  function renderEngagement(e) {
+    const card = el("engagement-card");
+    const tag = el("engagement-tag");
+    if (!card) return;
+    if (!e || !e.available) {
+      card.innerHTML = `<p class="empty-state">${e?.reason || "Engagement data unavailable."}</p>`;
+      if (tag) { tag.textContent = "unavailable"; tag.className = "section-tag tag-warn"; }
+      return;
+    }
+
+    const calls    = e.calls    || { in_window: 0, per_day: [] };
+    const meetings = e.meetings || { in_window: 0, per_day: [] };
+    const emails   = e.emails   || { in_window: 0, per_day: [] };
+
+    // Tag reflects state: green=meeting booked, red=no meetings, amber=low
+    if (tag) {
+      if (meetings.in_window === 0) { tag.textContent = "no walkthroughs"; tag.className = "section-tag tag-warn"; }
+      else if (calls.in_window < 5) { tag.textContent = "low"; tag.className = "section-tag tag-warn"; }
+      else { tag.textContent = "active"; tag.className = "section-tag tag-ok"; }
+    }
+
+    const chip = (label, val) => {
+      const n = Number(val) || 0;
+      const klass = n > 0 ? "stat-pos" : "stat-zero";
+      return `<div class="stat-block"><div class="stat-num ${klass}">${n.toLocaleString()}</div><div class="stat-label">${label}</div></div>`;
+    };
+
+    // Sparkline helper (reused pattern from other sections)
+    const spark = (perDay) => {
+      if (!perDay || !perDay.length) return "";
+      const vals = perDay.map(d => Number(d.count) || 0);
+      const max = Math.max(1, ...vals);
+      const w = 280, h = 60, pad = 4;
+      const step = vals.length > 1 ? (w - 2 * pad) / (vals.length - 1) : 0;
+      const points = vals.map((v, i) => {
+        const x = pad + i * step;
+        const y = h - pad - (v / max) * (h - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="60" preserveAspectRatio="xMidYMid meet" class="sparkline">` +
+        `<polyline points="${points.join(' ')}" fill="none" stroke="currentColor" stroke-width="2" />` +
+        points.map(p => {
+          const [cx, cy] = p.split(",");
+          return `<circle cx="${cx}" cy="${cy}" r="3" fill="currentColor" />`;
+        }).join("") +
+        `</svg>`;
+    };
+
+    const daysTable = (perDay) => {
+      if (!perDay || !perDay.length) return '<li class="muted">No data in window</li>';
+      return perDay.map(d =>
+        `<li><span class="muted">${d.date}</span> — <strong>${d.count}</strong></li>`
+      ).join("");
+    };
+
+    let alert = "";
+    if (meetings.in_window === 0 && calls.in_window > 0) {
+      alert = `<div class="fm-alert fm-alert-warn">⚠️ ${calls.in_window} calls logged but 0 walkthroughs booked in 14d. ` +
+              `Either no contacted lead has advanced, or walkthroughs are happening off-HubSpot.</div>`;
+    }
+
+    card.innerHTML = `
+      ${alert}
+      <div class="stat-row">
+        ${chip("Calls (14d)", calls.in_window)}
+        ${chip("Meetings (14d)", meetings.in_window)}
+        ${chip("Emails (14d)", emails.in_window)}
+      </div>
+      <h4>Activity timeline (14d)</h4>
+      <div class="sparkline-row">
+        <div class="sparkline-block">
+          <div class="sparkline-label">calls / day</div>
+          ${spark(calls.per_day)}
+        </div>
+        <div class="sparkline-block">
+          <div class="sparkline-label">emails / day</div>
+          ${spark(emails.per_day)}
+        </div>
+      </div>
+      <details>
+        <summary>Day-by-day breakdown</summary>
+        <h5 style="margin-top:8px;font-size:11px;color:var(--c-muted);text-transform:uppercase;">Calls</h5>
+        <ol class="fm-weeks">${daysTable(calls.per_day)}</ol>
+        <h5 style="margin-top:8px;font-size:11px;color:var(--c-muted);text-transform:uppercase;">Meetings</h5>
+        <ol class="fm-weeks">${daysTable(meetings.per_day)}</ol>
+        <h5 style="margin-top:8px;font-size:11px;color:var(--c-muted);text-transform:uppercase;">Emails</h5>
+        <ol class="fm-weeks">${daysTable(emails.per_day)}</ol>
+      </details>
+      <p class="muted small">Source: HubSpot CRM (calls, meetings, emails object types) — ${e.window_start} to ${e.window_end}. Per-call duration and disposition not yet wired (v2.1, pending Composio MCP fix).</p>
+    `;
+  }
+
   function renderCustomer(c) {
     const card = el("customer-card");
     if (!c.available) {
@@ -463,6 +559,7 @@
     renderSales(kpis.sales || {});
     renderFunnelMotion(kpis.funnel_motion || {});   // NEW in v2
     renderOutreach(kpis.outreach || {});            // NEW in v2
+    renderEngagement(kpis.engagement || {});        // NEW in v2
     renderCustomer(kpis.customer || {});
     renderActions(kpis.actions || []);
   }
