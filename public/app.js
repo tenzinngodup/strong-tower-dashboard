@@ -190,6 +190,120 @@
       `<span class="muted">(${total} total in funnel)</span>`;
   }
 
+  // ── Funnel motion (NEW in v2) ──────────────────────────────────
+  // Renders weekly pipeline trend + auto-action callouts.
+  // Tells the owner at a glance: is the pipeline moving or frozen?
+  function renderFunnelMotion(fm) {
+    const card = el("funnel-motion-card");
+    if (!card) return;
+    const tag = el("funnel-motion-tag");
+    if (!fm || !fm.available) {
+      card.innerHTML = `<p class="empty-state">${fm?.reason || "Funnel-motion data unavailable."}</p>`;
+      if (tag) { tag.textContent = "unavailable"; tag.className = "section-tag tag-warn"; }
+      return;
+    }
+
+    const totals = fm.totals_current || {};
+    const delta  = fm.this_week_delta || {};
+    const trend  = fm.trend || [];
+    const isFrozen = !!fm.frozen;
+    const weeksSinceOutreach = fm.weeks_since_outreach;
+
+    // Section tag reflects state: green=ok, red=frozen, amber=stale
+    if (tag) {
+      if (isFrozen) { tag.textContent = "frozen"; tag.className = "section-tag tag-warn"; }
+      else if (weeksSinceOutreach != null && weeksSinceOutreach >= 1) { tag.textContent = "stale"; tag.className = "section-tag tag-warn"; }
+      else { tag.textContent = "moving"; tag.className = "section-tag tag-ok"; }
+    }
+
+    // Mini sparkline (SVG) for the active count over the trend window.
+    const spark = (col) => {
+      if (!trend.length) return "";
+      const vals = trend.map(t => Number(t[col]) || 0);
+      const max = Math.max(1, ...vals);
+      const w = 280, h = 60, pad = 4;
+      const step = vals.length > 1 ? (w - 2 * pad) / (vals.length - 1) : 0;
+      const points = vals.map((v, i) => {
+        const x = pad + i * step;
+        const y = h - pad - (v / max) * (h - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      const polyline = `<polyline points="${points.join(' ')}" fill="none" stroke="currentColor" stroke-width="2" />`;
+      const dots = points.map(p => {
+        const [cx, cy] = p.split(",");
+        return `<circle cx="${cx}" cy="${cy}" r="3" fill="currentColor" />`;
+      }).join("");
+      return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="60" preserveAspectRatio="xMidYMid meet" class="sparkline">${polyline}${dots}</svg>`;
+    };
+
+    // This-week chips. We render each as a stat-block; if delta is 0 we
+    // surface that fact explicitly (not silently as "no change").
+    const chip = (label, val, isCount = true) => {
+      const n = Number(val) || 0;
+      const txt = isCount ? n.toLocaleString() : n;
+      const klass = n > 0 ? "stat-pos" : (n < 0 ? "stat-neg" : "stat-zero");
+      return `<div class="stat-block"><div class="stat-num ${klass}">${txt}</div><div class="stat-label">${label}</div></div>`;
+    };
+
+    const weeksList = trend.length
+      ? trend.map(t => {
+          const d = (t.date || "").slice(5);  // MM-DD
+          return `<li><span class="muted">${d}</span> ` +
+                 `active <strong>${t.active}</strong> · ` +
+                 `contacted <strong>${t.contacted}</strong> · ` +
+                 `sent <strong>${t.sent}</strong> · ` +
+                 `hs_new <strong>${t.hubspot_new}</strong></li>`;
+        }).join("")
+      : '<li class="muted">No weekly snapshots in leads_history.csv yet</li>';
+
+    let alert = "";
+    if (isFrozen) {
+      alert = `<div class="fm-alert fm-alert-warn">⚠️ Pipeline counts unchanged for 3+ weeks — ` +
+              `active=${totals.active}, contacted=${totals.contacted}, won=${totals.won}, lost=${totals.lost}. ` +
+              `Either no outreach happened, or the data isn't being recorded.</div>`;
+    } else if (weeksSinceOutreach != null && weeksSinceOutreach >= 1) {
+      alert = `<div class="fm-alert fm-alert-info">ℹ️ SDR has not sent outreach in ${weeksSinceOutreach} week(s).</div>`;
+    }
+
+    card.innerHTML = `
+      ${alert}
+      <div class="stat-row">
+        ${chip("Active",    totals.active)}
+        ${chip("Contacted", totals.contacted)}
+        ${chip("Won",       totals.won)}
+        ${chip("Lost",      totals.lost)}
+      </div>
+      <h4>This week</h4>
+      <div class="stat-row">
+        ${chip("New active",    delta.new_active)}
+        ${chip("New contacted", delta.new_contacted)}
+        ${chip("Sent",          delta.sent)}
+        ${chip("HubSpot new",   delta.hubspot_new)}
+      </div>
+      <h4>Trend (last ${trend.length} weeks)</h4>
+      <div class="sparkline-row">
+        <div class="sparkline-block">
+          <div class="sparkline-label">active</div>
+          ${spark("active")}
+        </div>
+        <div class="sparkline-block">
+          <div class="sparkline-label">sent</div>
+          ${spark("sent")}
+        </div>
+        <div class="sparkline-block">
+          <div class="sparkline-label">hubspot_new</div>
+          ${spark("hubspot_new")}
+        </div>
+      </div>
+      <details>
+        <summary>Weekly snapshots</summary>
+        <ol class="fm-weeks">${weeksList}</ol>
+      </details>
+      <p class="muted small">Source: <code>leads/email_status.csv</code> (SDR weekly log) — ` +
+        `${fm.days_since_last ?? "?"} day(s) since last entry.</p>
+    `;
+  }
+
   function renderCustomer(c) {
     const card = el("customer-card");
     if (!c.available) {
@@ -262,6 +376,7 @@
     renderHeadlines(kpis.headlines || {});
     renderMarketing(kpis.marketing || {});
     renderSales(kpis.sales || {});
+    renderFunnelMotion(kpis.funnel_motion || {});   // NEW in v2
     renderCustomer(kpis.customer || {});
     renderActions(kpis.actions || []);
   }

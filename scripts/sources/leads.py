@@ -51,6 +51,24 @@ def collect() -> dict:
     won       = _read_csv(LEADS_DIR / "won.csv")
     lost      = _read_csv(LEADS_DIR / "lost.csv")
 
+    # CSV staleness: the lead files are updated manually by the SDR. If they
+    # haven't been touched in >14 days, the funnel numbers on the dashboard
+    # are showing a stale snapshot. This is a useful signal — the dashboard
+    # surfaces it as a high-severity action item.
+    from datetime import datetime, timezone
+    csv_staleness: dict[str, int] = {}
+    for name, rows in (("active", active), ("contacted", contacted),
+                       ("won", won), ("lost", lost)):
+        path = LEADS_DIR / f"{name}.csv"
+        if not path.exists() or not rows:
+            csv_staleness[name] = -1  # missing
+            continue
+        mtime = path.stat().st_mtime
+        dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+        csv_staleness[name] = (datetime.now(timezone.utc) - dt).days
+    oldest_csv_days = max(d for d in csv_staleness.values() if d >= 0) if any(d >= 0 for d in csv_staleness.values()) else -1
+    csvs_stale = oldest_csv_days > 14
+
     total_reachable = len(active) + len(contacted) + len(won) + len(lost)
 
     funnel = {label: 0 for label in FUNNEL_ORDER}
@@ -102,6 +120,9 @@ def collect() -> dict:
         "data_quality": {
             "icp_drift_rows":  drift_count,
             "icp_drift_sample": drift_rows[:5],  # first 5 for the dashboard "details" view
+            "csv_staleness_days":  csv_staleness,
+            "oldest_csv_days":     oldest_csv_days,
+            "csvs_stale":          csvs_stale,
         },
     })
 

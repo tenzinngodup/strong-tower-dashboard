@@ -40,6 +40,7 @@ def compute(snapshot: dict) -> dict:
         }
     """
     leads  = snapshot.get("leads") or {}
+    lh     = snapshot.get("leads_history") or {}
     hs     = snapshot.get("hubspot") or {}
     bl     = snapshot.get("blotato") or {}
     ga     = snapshot.get("ga4") or {}
@@ -105,6 +106,24 @@ def compute(snapshot: dict) -> dict:
         return funnel
     funnel = _safe(_funnel, default={})
 
+    # ── Section 3.5: Funnel motion (NEW in v2) ─────────────────────────
+    # Pulled from leads_history.py — the SDR's weekly pipeline log.
+    # Answers: "is the pipeline moving week-over-week, or is it frozen?"
+    def _funnel_motion():
+        if not lh.get("ok"):
+            return {"available": False, "reason": "leads_history not fetched this run"}
+        staleness = lh.get("staleness") or {}
+        return {
+            "available":        True,
+            "totals_current":   lh.get("totals_current") or {},
+            "this_week_delta":  lh.get("this_week_delta") or {},
+            "trend":            lh.get("trend_6w") or [],
+            "frozen":           staleness.get("frozen_pipeline", False),
+            "days_since_last":  staleness.get("days_since_last"),
+            "weeks_since_outreach": staleness.get("weeks_since_outreach"),
+        }
+    funnel_motion = _safe(_funnel_motion, default={"available": False})
+
     # ── Section 4: Customer / operations ────────────────────────────────
     # "Active accounts" + MRR come from HubSpot deals. We don't have that
     # field today, so return a "not available" stub that the dashboard
@@ -135,6 +154,41 @@ def compute(snapshot: dict) -> dict:
                 "title":    f"{dq['icp_drift_rows']} leads have non-standard icp values",
                 "detail":   "Notes, scores, or dates leaked into the `icp` column. Cleanup the CSV.",
                 "source":   "leads_csv",
+            })
+
+        # Data quality: lead CSVs themselves are stale.
+        oldest = dq.get("oldest_csv_days", 0) or 0
+        if oldest > 14:
+            items.append({
+                "severity": "high" if oldest > 30 else "medium",
+                "title":    f"Lead CSVs are {oldest} days old",
+                "detail":   f"active.csv hasn't been updated in {oldest} days. The funnel numbers may be misleading.",
+                "source":   "leads_csv",
+            })
+
+        # Funnel motion: pipeline has been frozen for multiple weeks.
+        fm = funnel_motion if isinstance(funnel_motion, dict) else {}
+        if fm.get("available") and fm.get("frozen"):
+            items.append({
+                "severity": "high",
+                "title":    "Pipeline counts have not changed in 3+ weeks",
+                "detail":   f"active={fm.get('totals_current', {}).get('active', '?')}, "
+                            f"contacted={fm.get('totals_current', {}).get('contacted', '?')}, "
+                            f"won={fm.get('totals_current', {}).get('won', '?')}, "
+                            f"lost={fm.get('totals_current', {}).get('lost', '?')} — same for 3+ weeks. "
+                            "Either no outreach happened, or the data isn't being recorded.",
+                "source":   "leads_history",
+            })
+
+        # Outreach: SDR hasn't sent emails in N weeks.
+        weeks_since = fm.get("weeks_since_outreach")
+        if isinstance(weeks_since, int) and weeks_since >= 2:
+            items.append({
+                "severity": "high" if weeks_since >= 4 else "medium",
+                "title":    f"SDR has not sent outreach in {weeks_since} weeks",
+                "detail":   "leads_history.csv shows 0 emails sent for the last "
+                            f"{weeks_since} weekly reports.",
+                "source":   "leads_history",
             })
 
         # Pipeline: stuck deals — if any active deal is old (we don't have
@@ -180,6 +234,7 @@ def compute(snapshot: dict) -> dict:
         "sales": {
             "funnel":    funnel,
         },
+        "funnel_motion": funnel_motion,   # NEW in v2
         "customer":  customer,
         "actions":   actions,
     }

@@ -44,7 +44,8 @@ DATA_DIR     = PROJECT_ROOT / "data"
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 SOURCES = [
-    "leads",  # file: scripts/sources/leads.py
+    "leads",           # file: scripts/sources/leads.py
+    "leads_history",   # file: scripts/sources/leads_history.py  (weekly motion log)
     "hubspot",
     "blotato",
     "ga4",

@@ -366,3 +366,104 @@ footer {
 }
 footer .small { font-size: 11px; margin-top: 4px; }
 .muted { color: var(--c-muted); }
+
+/* ── Section tag (Funnel motion: moving / frozen / stale) ────── */
+.section-tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: #e2e8f0;
+  color: #475569;
+  vertical-align: middle;
+}
+.section-tag.tag-ok   { background: #dcfce7; color: #15803d; }
+.section-tag.tag-warn { background: #fee2e2; color: #991b1b; }
+
+/* ── Funnel motion section ─────────────────────────────────── */
+#funnel-motion .card h4 {
+  margin: 18px 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--c-muted);
+  font-weight: 600;
+}
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0 4px;
+}
+.stat-block {
+  flex: 1 1 80px;
+  min-width: 80px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  text-align: center;
+}
+.stat-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--c-text);
+  line-height: 1.1;
+}
+.stat-num.stat-pos  { color: #15803d; }
+.stat-num.stat-neg  { color: #b91c1c; }
+.stat-num.stat-zero { color: #94a3b8; }
+.stat-label {
+  font-size: 11px;
+  color: var(--c-muted);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.sparkline-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 4px 0 12px;
+}
+.sparkline-block {
+  background: #f8fafc;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.sparkline-block .sparkline-label {
+  font-size: 11px;
+  color: var(--c-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+.sparkline-block .sparkline { color: #1e4d6b; }
+.fm-alert {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.fm-alert-warn { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.fm-alert-info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+.fm-weeks {
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.fm-weeks .muted { font-size: 11px; margin-right: 6px; }
+details summary {
+  cursor: pointer;
+  color: var(--c-muted);
+  font-size: 12px;
+  margin-top: 12px;
+  user-select: none;
+}
