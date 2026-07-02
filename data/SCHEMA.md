@@ -10,8 +10,9 @@ This file documents every field, where it comes from, and the staleness contract
 
 | Source key | What it fetches | Auth | Latency budget |
 |---|---|---|---|
-| `leads` | Local CSVs in `~/workspace/leads/*.csv` | none (filesystem) | < 1s |
-| `leads_history` | Weekly pipeline motion log (`leads/email_status.csv`) | none (filesystem) | < 1s |
+| `leads` | Local CSVs in `~/workspace/leads/*.csv` (LEGACY May 2026 outreach, paused) | none (filesystem) | < 1s |
+| `leads_history` | Weekly pipeline motion log (`leads/email_status.csv`, LEGACY) | none (filesystem) | < 1s |
+| `pipeline` | Unified HubSpot B2B pipeline (`leads/pipeline_master.csv`, 244 cos) | none (filesystem) | < 1s |
 | `gmail` | SDR sent emails (last 14d) — volume + bounce signal | Composio MCP (`COMPOSIO_API_KEY`) | 35-45s (20 hydrations) |
 | `hubspot` | Deals (active + archived), portal metadata | Composio MCP (`COMPOSIO_API_KEY`) | 5-15s |
 | `hubspot_events` | Calls / meetings / emails volume, last 14d | Composio MCP (`COMPOSIO_API_KEY`) | 5-10s |
@@ -124,7 +125,7 @@ all the network sources.
   "computed_at": "2026-07-01T22:50:01+00:00",
   "headlines": {
     "pipeline_value_usd": 0.0,            // HubSpot open deals sum
-    "new_leads":          44,              // leads_csv "active" count
+    "new_leads":          { "value": 0, "total": 244, "source": "HubSpot pipeline", "note": "of 244 total companies uploaded" },  // CHANGED in v3: was a plain number
     "win_rate":           { "value": null, "closed_won": 0, "closed_lost": 0, "note": "no closed deals yet" },
     "blended_cac":        null             // placeholder — spend data not wired
   },
@@ -150,10 +151,11 @@ all the network sources.
     "note":      "no closed-won deals yet"
   },
   "actions": [                              // auto-generated
-    { "severity": "medium", "title": "12 leads have non-standard icp values", "source": "leads_csv", "detail": "..." },
-    { "severity": "high",   "title": "Lead CSVs are 57 days old",              "source": "leads_csv", "detail": "..." },
-    { "severity": "high",   "title": "Pipeline counts have not changed in 3+ weeks", "source": "leads_history", "detail": "..." },
-    { "severity": "high",   "title": "No walkthroughs booked in 14d",          "source": "hubspot_events", "detail": "..." }
+    { "severity": "high",   "title": "64 draft emails are waiting in Gmail (not sent)", "source": "pipeline", "detail": "..." },
+    { "severity": "high",   "title": "No walkthroughs booked in 14d",          "source": "hubspot_events", "detail": "..." },
+    { "severity": "medium", "title": "56 companies are ready to draft",         "source": "pipeline", "detail": "..." },
+    { "severity": "low",    "title": "0 emails sent from the 244-company HubSpot pipeline", "source": "pipeline", "detail": "..." },
+    { "severity": "low",    "title": "[Legacy] May 2026 pipeline counts unchanged for 3+ weeks", "source": "leads_history (legacy)", "detail": "..." }
   ],
   "funnel_motion": {                       // NEW in v2
     "available":       true,
@@ -162,12 +164,13 @@ all the network sources.
     "trend":           [ ... ],
     "frozen":          true,
     "days_since_last": 6,
-    "weeks_since_outreach": 2
+    "weeks_since_outreach": 2,
+    "source_label":    "Legacy May 2026 outreach (paused)"
   },
   "outreach": {                            // NEW in v2
     "available":    true,
     "window_days":  14,
-    "sent":         73,
+    "sent":         73,                     // ⚠️ 73 = legacy Apollo outreach. 0 from HubSpot pipeline (see "pipeline" block).
     "per_day_avg":  5.2,
     "bounced_est":  0,
     "bounce_rate":  0.0,
@@ -180,6 +183,20 @@ all the network sources.
     "calls":     { "in_window": 59, "per_day": [...] },
     "meetings":  { "in_window": 0,  "per_day": [] },
     "emails":    { "in_window": 73, "per_day": [...] }
+  },
+  "pipeline": {                            // NEW in v3 — THE real B2B pipeline
+    "available":         true,
+    "total":             244,
+    "with_contact":      121,
+    "with_note":         244,
+    "stages":            { "noted": 179, "drafted_not_sent": 60, "contacted": 4, "active": 1, "lost": 0 },
+    "ready_to_draft":    56,                // noted + has contact + no draft
+    "drafts_waiting":    64,                // 60 steven + 4 miguel, all in Gmail drafts
+    "drafts_by_sender":  { "steven": 60, "miguel": 4 },
+    "weekly_additions":  [ { "week": "2026-05-25", "added": 0 }, { "week": "2026-06-01", "added": 0 }, ... ],
+    "batches":           { "master": 39, "06-12": 21, "06-13": 40, "06-17": 21, "06-18": 123 },
+    "sample_drafts":     [ { "company": "...", "subject": "...", "sender": "steven|miguel" } ],
+    "freshness":         "1h old"
   }
 }
 ```
@@ -224,16 +241,35 @@ looking at.
 
 - **Funnel motion** (from `leads_history.csv`): weekly pipeline trend
   over 6 weeks, frozen-pipeline detection, weeks-since-outreach signal.
-  Verified working 2026-07-02.
+  Labeled "Legacy" — the legacy Apollo outreach (gym/dental) has been
+  paused since May 2026. Verified working 2026-07-02.
 - **SDR outreach volume** (from Gmail via Composio): sent count,
   per-day bucketing, bounce estimate from hydrated sample of 20 most
   recent. Reply count deferred to v2.1. Verified: 73 sent in 14d.
+  ⚠️ **The 73 sent are the LEGACY Apollo outreach, NOT the HubSpot pipeline.**
 - **HubSpot engagement events** (calls/meetings/emails): per-day volume
   for the last 14d. Per-event details (duration, disposition) blocked
   on MCP wrapper fix. Verified: 59 calls, 0 meetings, 73 emails.
 - **CSV staleness detector** in `leads.py`: flags when the lead CSVs
   haven't been touched in >14 days. Verified working — currently
-  reporting 57 days old (high severity).
+  reporting 57 days old (high severity, but the CSVs are paused, not broken).
+
+## What we DO have now (added in v3)
+
+- **HubSpot B2B pipeline** (from `leads/pipeline_master.csv`): the 244-company
+  B2B universe across 5 HubSpot upload batches, with per-stage counts
+  (179 noted, 60 drafted-not-sent, 4 contacted, 1 active, 0 lost),
+  weekly additions, batch breakdown, and 5-sample of the 64 drafts
+  in Gmail. Built by `scripts/build_pipeline_status.py` in the main
+  workspace (NOT in the dashboard repo) — re-run when new batches
+  are uploaded or steven's drafts are sent.
+- **Three new pipeline action items** auto-generated: "64 drafts waiting
+  in Gmail", "56 companies ready to draft", "0 emails sent from the
+  244-company HubSpot pipeline". The first is now the top-priority
+  action item on the dashboard.
+- **Legacy labels** on the previous action items: "Pipeline counts have
+  not changed in 3+ weeks" is now downgraded to low and labeled as
+  referring to the LEGACY funnel, not the current B2B pipeline.
 
 ## How to add a new KPI
 

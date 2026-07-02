@@ -44,8 +44,9 @@ DATA_DIR     = PROJECT_ROOT / "data"
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 SOURCES = [
-    "leads",           # file: scripts/sources/leads.py
-    "leads_history",   # file: scripts/sources/leads_history.py  (weekly motion log)
+    "leads",           # file: scripts/sources/leads.py  (legacy May Apollo outreach)
+    "leads_history",   # file: scripts/sources/leads_history.py  (legacy email_status.csv motion log)
+    "pipeline",        # file: scripts/sources/pipeline.py  (HubSpot B2B pipeline — 244 cos)
     "gmail",           # file: scripts/sources/gmail.py  (SDR outreach via Composio)
     "hubspot",         # file: scripts/sources/hubspot.py  (deals)
     "hubspot_events",  # file: scripts/sources/hubspot_events.py  (calls/meetings/emails)

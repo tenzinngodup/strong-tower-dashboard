@@ -54,13 +54,14 @@ A **static page** at https://strong-tower-dashboard.pages.dev that a **weekly cr
 
 **Why this shape (and not Workers + KV + auth):** the owner checks weekly, not live. A static page with weekly data is simpler, cheaper ($0/mo), and faster than any real-time stack. v1 was over-engineered; v2 stays static.
 
-## 3. The 7 sources — what they answer, how they fail
+## 3. The 8 sources — what they answer, how they fail
 
 | Source | Question it answers | Auth | Wall-clock | Common failure |
 |---|---|---|---|---|
-| `leads` | "How many leads in each funnel stage?" | filesystem | <1s | CSVs untouched for >14d → action item fires |
-| `leads_history` | "Is the pipeline moving week-over-week?" | filesystem | <1s | SDR's weekly log stops being updated |
-| `gmail` | "Is the SDR sending emails? Any bounces?" | Composio MCP | 35-45s | Wrong Composio account, rate limit |
+| `leads` | "How many leads in the LEGACY May 2026 funnel?" | filesystem | <1s | CSVs untouched for >14d → action item fires (but they're paused) |
+| `leads_history` | "Is the LEGACY May pipeline moving week-over-week?" | filesystem | <1s | SDR's weekly log stops being updated |
+| `pipeline` | **"What's the real 244-company HubSpot B2B pipeline doing?"** | filesystem | <1s | `pipeline_master.csv` missing → re-run `scripts/build_pipeline_status.py` |
+| `gmail` | "Is the SDR sending emails? Any bounces?" | Composio MCP | 35-45s | Wrong Composio account, rate limit. ⚠️ Counts LEGACY outreach, not HubSpot |
 | `hubspot` | "What's in the open pipeline?" | Composio MCP | 5-15s | Token rotated, account 403 |
 | `hubspot_events` | "After the touch, do leads engage?" | Composio MCP | 5-10s | Same as `hubspot`; per-event details blocked on MCP wrapper fix |
 | `blotato` | "Are we posting on schedule?" | REST | 2-5s | Token expired |
@@ -70,16 +71,23 @@ A **static page** at https://strong-tower-dashboard.pages.dev that a **weekly cr
 
 **Failure isolation pattern (read this before touching any source):** every source's `collect()` MUST return `safe_source_payload(name, payload, error=...)` and MUST catch every exception. The orchestrator (`ingest.py`) wraps the call too, but the source's own try/except is what makes the failure *informative* (`ok: false` with a clear message, not a stack trace).
 
+**The legacy vs real pipeline distinction is the single most important concept in this dashboard.** Two completely separate lead universes:
+- `leads` + `leads_history` = **legacy May 2026 Apollo outreach** (gyms, dental, fitness) — paused since 5/5
+- `pipeline` = **current June 2026 HubSpot B2B universe** (property managers, GCs, title, senior living) — 244 companies, 64 drafts waiting in Gmail
+
+**The 73 emails sent in the last 14d are the LEGACY outreach, not the HubSpot pipeline.** Zero emails have been sent to the 244-company HubSpot pipeline.
+
 ## 4. The page — 7 sections, in order
 
-1. **Headlines** (4 KPI cards: pipeline, leads, win rate, CAC) — 3 of 4 are deliberately "—" because the data isn't there yet. Don't try to fill them with fake numbers.
-2. **Funnel motion** (NEW v2) — weekly pipeline trend from `leads_history.csv`. Surfaces "frozen pipeline" if counts haven't changed for 3+ weeks. **This is the most actionable section.**
-3. **Outreach** (NEW v2) — SDR sent email volume from Gmail + bounce signal. Replies not yet wired (v2.1).
-4. **Engagement** (NEW v2) — HubSpot calls/meetings/emails volume. **Alerts when calls > 0 but meetings = 0** (the "no walkthroughs booked" signal).
-5. **Marketing** — Blotato cadence + GA4 traffic. Unchanged from v1.
-6. **Sales pipeline** — funnel chart from `leads.csv`. Unchanged from v1.
-7. **Customer & operations** — gray placeholder until first closed-won deal. Don't add fake MRR.
-8. **Action items** — auto-generated. 4 currently fire as high-severity.
+1. **Headlines** (4 KPI cards: pipeline, leads, win rate, CAC) — 3 of 4 are deliberately "—" because the data isn't there yet. Don't try to fill them with fake numbers. `new_leads` is now a dict `{value, total, source, note}` (v3) — it shows the weekly additions to the HubSpot pipeline.
+2. **HubSpot pipeline** (NEW v3) — **the most important section.** 244 companies, per-stage counts, weekly additions, draft queue (60 steven + 4 miguel = 64 waiting in Gmail), sample of 5 drafts with subjects. The owner's #1 question — "what should steven be doing right now?" — is answered here.
+3. **Legacy funnel motion** (NEW v2, now labeled legacy) — weekly pipeline trend from `leads_history.csv`. Surfaces "frozen pipeline" if counts haven't changed for 3+ weeks. Relabeled to make it clear this is the legacy May funnel, not the current B2B pipeline.
+4. **Outreach** (NEW v2) — SDR sent email volume from Gmail + bounce signal. ⚠️ This is the LEGACY Apollo outreach, NOT the HubSpot pipeline. Replies not yet wired (v2.1).
+5. **Engagement** (NEW v2) — HubSpot calls/meetings/emails volume. **Alerts when calls > 0 but meetings = 0** (the "no walkthroughs booked" signal).
+6. **Marketing** — Blotato cadence + GA4 traffic. Unchanged from v1.
+7. **Sales pipeline** — funnel chart from `leads.csv` (legacy). Unchanged from v1.
+8. **Customer & operations** — gray placeholder until first closed-won deal. Don't add fake MRR.
+9. **Action items** — auto-generated, severity-sorted. Top item is now "64 draft emails are waiting in Gmail" (v3).
 
 **Each section has a colored tag** in its header: green (`tag-ok`) = healthy, red (`tag-warn`) = needs attention. Tags are state-driven (frozen pipeline, no walkthroughs, low calls), not aesthetic.
 
@@ -127,47 +135,60 @@ The scheduler re-reads prompts from the in-memory registry, not from disk. Edit 
 ### 6.7 CF Pages direct-upload is faster than GitHub auto-deploy
 `npx wrangler pages deploy public --project-name=X` takes ~5s and works without GitHub OAuth. CF's auto-deploy on git push takes 30-60s (build queue). We use direct upload in the cron. If you later wire GitHub OAuth, change the deploy step in `scripts/refresh_and_deploy.sh` to `git push origin main`.
 
-### 6.8 The lead CSVs in `workspace/leads/*.csv` are the source of truth for the funnel
-NOT the HubSpot deals. The HubSpot pipeline is empty (0 active deals) but the lead CSVs have 44 active + 26 contacted. **If you only look at HubSpot, the dashboard will show "0 active" forever and the owner will think the funnel is dead.** The CSVs are hand-maintained by the SDR; they have known schema drift (the `icp` column has notes/dates leaked in 12 rows; the `stage` column is similarly dirty).
+### 6.8 (OBSOLETE in v3) The lead CSVs in `workspace/leads/*.csv` are the source of truth for the funnel
+**REPLACED by 6.8b in v3.** The lead CSVs (active.csv, contacted.csv, won.csv, lost.csv) are now labeled "Legacy May 2026 outreach (paused)" in the dashboard. They were the source of truth for v1/v2, but the real B2B pipeline is the 244-company HubSpot universe tracked in `pipeline_master.csv`. The CSVs have known schema drift (12 rows with non-standard `icp` values, similar drift in `stage`) and haven't been updated since 2026-05-05.
 
-### 6.9 `leads/email_status.csv` is the SDR's weekly motion log
-This is **already being collected** by the SDR's email-status pipeline. It has `active/contacted/won/lost/sent/hubspot_new` per week. **It is the dashboard's primary source for "is the pipeline moving week-over-week"** — much more useful than trying to derive motion from the static CSVs. The funnel_motion section reads this file.
+### 6.8b (NEW v3) `leads/pipeline_master.csv` is the real B2B pipeline — and it's the dashboard's primary "what's the funnel doing" source
+Built by `scripts/build_pipeline_status.py` in the main workspace (NOT in this dashboard repo). 244 companies, 14 columns, 1 row per HubSpot company. Cross-references 5 HubSpot upload batches + `lead_gen_drafts_log.csv` (steven's 71 drafts) to infer a stage per company: `noted` (179) → `drafted_not_sent` (60) → `contacted` (4) → `active` (1) → `won` (0) → `lost` (0).
+
+The dashboard's "HubSpot pipeline" section reads this file. **If you delete or don't regenerate it, the most important section of the dashboard disappears.** The source (`scripts/sources/pipeline.py`) returns `ok: false` with a clear error if the file is missing, telling the operator to re-run the build script.
+
+### 6.9 (OBSOLETE in v3) `leads/email_status.csv` is the SDR's weekly motion log
+**RELABELED in v3.** This file is now labeled "Legacy May 2026 outreach (paused)" in the dashboard. It tracks the legacy Apollo gym/dental outreach, not the HubSpot B2B pipeline. The 73 emails sent in 14d (Gmail) match up with this file, NOT with the HubSpot pipeline. The HubSpot pipeline has **0 emails sent** to date (the 64 drafts in Gmail are sitting unsent).
+
+The "Legacy funnel motion" section still reads this file, but it's now third-priority in the page (after the HubSpot pipeline section). Don't delete it — the historical data has value — but don't add new entries to it either (they'd be confusingly mixed with the HubSpot pipeline data).
 
 ### 6.10 The HubSpot `calls` object has no duration/disposition yet
 Blocked on Composio MCP wrapper (see 6.1). Volume (in-window count) is wired; per-call details are not. Don't try to call `HUBSPOT_READ_CRM_OBJECT_BY_ID` to hydrate — that would be 59+ calls per ingest.
 
 ## 7. The "current state" you should know
 
-As of 2026-07-02, the dashboard surfaces 4 high-severity + 1 medium action item:
+As of 2026-07-02 (post-v3 wire-in), the dashboard surfaces 3 high-severity + 2 medium + 3 low action items. **The legacy items are now downgraded to low** and clearly labeled. The high-severity items are now REAL:
 
 | Severity | Title | Source | Owner interpretation |
 |---|---|---|---|
-| high | Lead CSVs are 57 days old | leads_csv | **The funnel numbers may be wrong.** Fix the SDR's CSV update process. |
-| high | Pipeline counts have not changed in 3+ weeks | leads_history | The pipeline IS frozen. Either no outreach or no recording. |
-| high | No walkthroughs booked in 14d | hubspot_events | 59 calls but 0 walkthroughs. Walkthroughs may be off-HubSpot. |
-| high | Pipeline counts have not changed in 3+ weeks | leads_history | (duplicate — deduplication is a v2.1 task) |
-| medium | 12 leads have non-standard icp values | leads_csv | CSV schema drift. Cleanup the CSV. |
-| medium | SDR has not sent outreach in 2 weeks | leads_history | **CONTRADICTS gmail.py which says 73 sent in 14d.** This is because leads_history.csv is 6 days stale (last entry 2026-06-26). The leads_history file is the SDR's weekly checkpoint; the SDR hasn't been checkpointing. |
+| **high** | **64 draft emails are waiting in Gmail (not sent)** | pipeline | **Steven has 60 drafts + Miguel has 4 drafts, none sent to the 244-company HubSpot pipeline. This is the highest-leverage action the SDR can take right now.** |
+| high | Legacy lead CSVs are 57 days old (paused since May 2026) | leads_csv | The legacy CSVs are paused, not broken. Action is to either retire them or restart the Apollo outreach. |
+| high | No walkthroughs booked in 14d | hubspot_events | 73 calls but 0 walkthroughs. Walkthroughs may be off-HubSpot. |
+| medium | 56 companies are ready to draft (researched + have a contact) | pipeline | Steven can work through this queue at ~5-10/day. |
+| medium | 12 leads have non-standard icp values (legacy CSV) | leads_csv | CSV schema drift in the legacy gym/dental CSVs. Cleanup the CSV. |
+| low | 0 emails sent from the 244-company HubSpot pipeline | pipeline | Reinforces the high-severity "drafts waiting" item. |
+| low | [Legacy] May 2026 pipeline counts unchanged for 3+ weeks | leads_history (legacy) | The legacy Apollo outreach is paused. Counts haven't changed because nothing is happening. |
+| low | [Legacy] No outreach in 2 weeks (paused pipeline) | leads_history (legacy) | Same as above. The SDR is drafting for the HubSpot pipeline, not the legacy one. |
 
-**Cross-source validation that DID work:** Gmail says 73 sent; HubSpot `emails` object says 73. Same number, two independent paths, agree.
+**Cross-source validation that DID work:** Gmail says 73 sent; HubSpot `emails` object says 73. Same number, two independent paths, agree. But both are the LEGACY outreach, not the HubSpot pipeline (which has 0 sent).
 
 **What the owner should do first (in order):**
-1. Get the SDR to update `leads/email_status.csv` weekly (resolves 1-2 action items).
-2. Verify walkthroughs are being logged to HubSpot (if they are, the 0 is real; if not, fix the process).
-3. Re-engage on the 25 contacted-but-stalled leads (the funnel motion chart shows them).
+1. **Open Gmail drafts and send steven's 60 + miguel's 4 drafts** (resolves the top-priority action item; moves the pipeline forward).
+2. **Verify walkthroughs are being logged to HubSpot** (if they are, the 0 is real; if not, fix the process).
+3. **Decide what to do with the 80-row legacy universe** (gyms/dental CSVs): retire them, re-enrich, or restart the Apollo outreach.
 
 ## 8. The v2.1+ backlog (if you have to extend this)
 
-| Item | Effort | Why it's not in v2 |
+| Item | Effort | Why it's not in v3 |
 |---|---|---|
 | Per-call duration / disposition in HubSpot | small (1 hour) IF MCP wrapper is fixed, else unblocker | Composio MCP rejects `properties` arg (see 6.1) |
 | Reply counts in gmail.py | medium (1-2 hours) | Per-thread INBOX lookup is 73+ MCP calls; adds 30s+ to ingest |
-| Per-lead "days since contacted" | medium (3-4 hours) | Lead CSVs don't have `createdate` columns — would need to add to the CSV schema first |
+| Per-lead "days since contacted" in pipeline.py | medium (3-4 hours) | Need to add `contact_date` to pipeline_master.csv (cross-ref with email_status.csv) |
+| Wire pipeline.py → email_status.csv for sent tracking | small (2 hours) | So the dashboard knows when each draft was actually sent. Today it's all "drafts not sent"; once steven sends, we need to update. |
 | IG Graph + LinkedIn Pages engagement (likes/comments) | large (4-6 hours + new OAuth) | Out of scope per v2 plan §10 |
 | Real-time / per-day refresh | small (10 min) | Just change the cron schedule from `0 14 * * 1` to `0 14 * * *` |
 | Custom domain `dashboard.strongtowercs.com` | 5 min (CF dashboard) | Owner hasn't asked for it |
-| Action item deduplication | small (30 min) | v2 already has 1 dup; v2.1 is to add a "title in last 30d" dedup key |
+| Action item deduplication | small (30 min) | Done in v3 for legacy items (downgraded to low + labeled) |
 | Wire GitHub → CF Pages for auto-deploys | 30 sec OAuth click in CF dashboard | Owner hasn't done it; direct upload works fine in the meantime |
+| Auto-rebuild pipeline_master.csv | medium (3 hours) | When steven sends a draft or a new HubSpot batch lands, the master CSV needs to regenerate. Today it's manual. Could be a webhook or a daily cron. |
+| Anomaly scan cron | small (2 hours) | Daily check for week-over-week drops, 0-sent days, etc. Posts to Discord. **Owner selected this as task #1 in the next phase.** |
+| SDR follow-up sequencer | medium (3-4 hours) | Reads `leads/contacted.csv` + gmail, identifies leads contacted >7d ago with no reply, drafts follow-ups to `leads/followups_due.csv` for human review. **Owner selected this as task #2 in the next phase.** |
 
 ## 9. Pointers
 

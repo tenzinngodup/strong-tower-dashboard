@@ -184,6 +184,8 @@ def collect() -> dict:
         },
         "trend_6w":    trend,
         "staleness":   quality,
+        "pipeline_status": "PAUSED — Legacy May 2026 Apollo outreach (gyms/dental). The current B2B pipeline is 244 HubSpot companies, see 'pipeline' source. This file's frozen-pipeline / stale-CSV alerts refer to the LEGACY funnel, not current work.",
+        "source_label": "Legacy May 2026 outreach (paused)",
     })
 
 

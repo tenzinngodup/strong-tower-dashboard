@@ -41,6 +41,7 @@ def compute(snapshot: dict) -> dict:
     """
     leads  = snapshot.get("leads") or {}
     lh     = snapshot.get("leads_history") or {}
+    pipe   = snapshot.get("pipeline") or {}    # NEW v3: HubSpot B2B pipeline
     hs     = snapshot.get("hubspot") or {}
     hse    = snapshot.get("hubspot_events") or {}
     bl     = snapshot.get("blotato") or {}
@@ -51,8 +52,19 @@ def compute(snapshot: dict) -> dict:
     # 1a. Active pipeline value (USD) — straight from HubSpot.
     pipeline_value = _safe(lambda: (hs.get("open_pipeline_value_usd") or 0))
 
-    # 1b. New SQLs / outreach activity this week — leads_csv New count.
-    new_leads = _safe(lambda: (leads.get("totals") or {}).get("active", 0))
+    # 1b. New SQLs / outreach activity this week — HubSpot pipeline "added this week".
+    # Falls back to leads_csv "active" count if pipeline source missing (legacy fallback).
+    def _new_leads():
+        if pipe.get("ok") and pipe.get("weekly_additions"):
+            this_week = pipe["weekly_additions"][-1] if pipe["weekly_additions"] else {}
+            return {
+                "value":    this_week.get("added", 0),
+                "total":    pipe.get("total", 0),
+                "source":   "HubSpot pipeline",
+                "note":     f"of {pipe.get('total', 0)} total companies uploaded",
+            }
+        return {"value": (leads.get("totals") or {}).get("active", 0), "source": "leads_csv (legacy)"}
+    new_leads = _safe(_new_leads)
 
     # 1c. Win rate over all-time — won / (won + lost) when both > 0.
     # For now, both are 0; the dashboard will show "0% (0/0)" honestly.
@@ -171,6 +183,32 @@ def compute(snapshot: dict) -> dict:
         return out
     engagement = _safe(_engagement, default={"available": False})
 
+    # ── Section 3.9: HubSpot pipeline (NEW in v3) ──────────────────────
+    # Pulled from pipeline.py — the unified 244-company B2B universe.
+    # Answers: "how many companies are in our real pipeline, where are they
+    # in the funnel, and what should Steven send next?"
+    def _pipeline():
+        if not pipe.get("ok"):
+            return {"available": False, "reason": pipe.get("error", "pipeline not fetched this run")}
+        stages = pipe.get("stages") or {}
+        return {
+            "available":         True,
+            "total":             pipe.get("total", 0),
+            "with_contact":      pipe.get("with_contact", 0),
+            "with_note":         pipe.get("with_note", 0),
+            "stages":            stages,
+            "ready_to_draft":    pipe.get("ready_to_draft", 0),
+            "drafts_waiting":    pipe.get("drafts_waiting", 0),
+            "drafts_by_sender":  pipe.get("drafts_by_sender", {}),
+            "weekly_additions":  pipe.get("weekly_additions", []),
+            "batches":           pipe.get("batches", {}),
+            "sample_drafts":     pipe.get("sample_drafts", []),
+            "freshness":         pipe.get("freshness", ""),
+            "file_age_hours":    pipe.get("file_age_hours"),
+            "note":              "HubSpot B2B pipeline. Legacy May 2026 Apollo outreach is paused — see 'funnel_motion' section.",
+        }
+    pipeline = _safe(_pipeline, default={"available": False})
+
     # ── Section 4: Customer / operations ────────────────────────────────
     # "Active accounts" + MRR come from HubSpot deals. We don't have that
     # field today, so return a "not available" stub that the dashboard
@@ -193,13 +231,56 @@ def compute(snapshot: dict) -> dict:
     def _action_items():
         items: list[dict] = []
 
+        # ── HIGH-PRIORITY: real pipeline alerts (v3) ──
+        # These override or accompany the legacy alerts below.
+
+        pl = pipeline if isinstance(pipeline, dict) else {}
+
+        # 1. Drafts are sitting in Gmail, never sent.
+        if pl.get("available") and pl.get("drafts_waiting", 0) > 0:
+            drafts = pl["drafts_waiting"]
+            by_sender = pl.get("drafts_by_sender", {})
+            steven = by_sender.get("steven", 0)
+            miguel = by_sender.get("miguel", 0)
+            items.append({
+                "severity": "high",
+                "title":    f"{drafts} draft emails are waiting in Gmail (not sent)",
+                "detail":   f"Steven: {steven} drafts, Miguel: {miguel} drafts. All {drafts} are sitting in Gmail drafts — "
+                            "none have been sent to the 244-company HubSpot pipeline. This is the highest-leverage "
+                            "action the SDR can take right now.",
+                "source":   "pipeline",
+            })
+
+        # 2. Companies ready to draft (have note + contact, no draft).
+        if pl.get("available") and pl.get("ready_to_draft", 0) > 0:
+            ready = pl["ready_to_draft"]
+            items.append({
+                "severity": "medium",
+                "title":    f"{ready} companies are ready to draft (researched + have a contact)",
+                "detail":   f"These companies have a HubSpot note and a contact, but no email draft. "
+                            f"Steven can work through this queue at ~5-10 per day.",
+                "source":   "pipeline",
+            })
+
+        # 3. HubSpot pipeline has 0 sent emails — explicit confirmation.
+        if pl.get("available"):
+            items.append({
+                "severity": "low",
+                "title":    "0 emails sent from the 244-company HubSpot pipeline",
+                "detail":   f"All 244 companies are still pre-send. {pl.get('drafts_waiting', 0)} drafts in Gmail, "
+                            f"{pl.get('ready_to_draft', 0)} companies ready to draft. "
+                            f"The {pl.get('total', 0)} companies here are the real B2B pipeline; "
+                            f"the 73 emails sent in the last 14d were to the legacy Apollo list (see Outreach).",
+                "source":   "pipeline",
+            })
+
         # Data quality: icp drift rows indicate CSV is dirty.
         dq = (leads.get("data_quality") or {})
         if dq.get("icp_drift_rows", 0) > 0:
             items.append({
                 "severity": "medium",
-                "title":    f"{dq['icp_drift_rows']} leads have non-standard icp values",
-                "detail":   "Notes, scores, or dates leaked into the `icp` column. Cleanup the CSV.",
+                "title":    f"{dq['icp_drift_rows']} leads have non-standard icp values (legacy CSV)",
+                "detail":   "Notes, scores, or dates leaked into the `icp` column. Cleanup the legacy CSV.",
                 "source":   "leads_csv",
             })
 
@@ -208,34 +289,37 @@ def compute(snapshot: dict) -> dict:
         if oldest > 14:
             items.append({
                 "severity": "high" if oldest > 30 else "medium",
-                "title":    f"Lead CSVs are {oldest} days old",
-                "detail":   f"active.csv hasn't been updated in {oldest} days. The funnel numbers may be misleading.",
+                "title":    f"Legacy lead CSVs are {oldest} days old (paused since May 2026)",
+                "detail":   f"active.csv hasn't been updated in {oldest} days. The legacy gym/dental funnel is paused; "
+                            "the real pipeline is the 244 HubSpot companies (see HubSpot Pipeline section).",
                 "source":   "leads_csv",
             })
 
-        # Funnel motion: pipeline has been frozen for multiple weeks.
+        # Funnel motion: pipeline has been frozen for multiple weeks (LEGACY).
         fm = funnel_motion if isinstance(funnel_motion, dict) else {}
         if fm.get("available") and fm.get("frozen"):
             items.append({
-                "severity": "high",
-                "title":    "Pipeline counts have not changed in 3+ weeks",
-                "detail":   f"active={fm.get('totals_current', {}).get('active', '?')}, "
+                "severity": "low",
+                "title":    "[Legacy] May 2026 pipeline counts unchanged for 3+ weeks",
+                "detail":   f"LEGACY: active={fm.get('totals_current', {}).get('active', '?')}, "
                             f"contacted={fm.get('totals_current', {}).get('contacted', '?')}, "
                             f"won={fm.get('totals_current', {}).get('won', '?')}, "
                             f"lost={fm.get('totals_current', {}).get('lost', '?')} — same for 3+ weeks. "
-                            "Either no outreach happened, or the data isn't being recorded.",
-                "source":   "leads_history",
+                            "This is the legacy Apollo (gym/dental) outreach that has been paused since May 2026. "
+                            "The current B2B pipeline is the 244-company HubSpot universe (see HubSpot Pipeline section).",
+                "source":   "leads_history (legacy)",
             })
 
-        # Outreach: SDR hasn't sent emails in N weeks.
+        # Outreach: SDR hasn't sent emails in N weeks (LEGACY).
         weeks_since = fm.get("weeks_since_outreach")
         if isinstance(weeks_since, int) and weeks_since >= 2:
             items.append({
-                "severity": "high" if weeks_since >= 4 else "medium",
-                "title":    f"SDR has not sent outreach in {weeks_since} weeks",
-                "detail":   "leads_history.csv shows 0 emails sent for the last "
-                            f"{weeks_since} weekly reports.",
-                "source":   "leads_history",
+                "severity": "low",
+                "title":    f"[Legacy] No outreach in {weeks_since} weeks (paused pipeline)",
+                "detail":   "LEGACY: leads_history.csv shows 0 emails sent for the last "
+                            f"{weeks_since} weekly reports. This is the legacy Apollo outreach that has been paused. "
+                            "Steven has 60 drafts in Gmail ready to send to the current HubSpot pipeline.",
+                "source":   "leads_history (legacy)",
             })
 
         # Engagement: no walkthroughs/meetings booked in 14d.
@@ -307,6 +391,7 @@ def compute(snapshot: dict) -> dict:
         "funnel_motion": funnel_motion,   # NEW in v2
         "outreach":      outreach,        # NEW in v2
         "engagement":    engagement,      # NEW in v2
+        "pipeline":      pipeline,        # NEW in v3
         "customer":  customer,
         "actions":   actions,
     }

@@ -124,6 +124,8 @@ def collect() -> dict:
             "oldest_csv_days":     oldest_csv_days,
             "csvs_stale":          csvs_stale,
         },
+        "pipeline_status": "PAUSED — May 2026 Apollo outreach (gyms/dental). The current B2B pipeline is 244 HubSpot companies, see 'pipeline' source. These CSVs have not been updated since May 2026 and represent a previous strategy, not active work.",
+        "source_label": "Legacy May 2026 outreach (paused)",
     })
 
 

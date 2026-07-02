@@ -16,6 +16,7 @@
   const $$ = (sel) => document.querySelectorAll(sel);
 
   function el(id)  { return document.getElementById(id); }
+  function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
   function text(t) { return document.createTextNode(t); }
 
   function fmtMoney(usd) {
@@ -62,7 +63,15 @@
   // ── Section renderers ────────────────────────────────────
   function renderHeadlines(h) {
     setValue("kpi-pipeline", fmtMoney(h.pipeline_value_usd), "HubSpot open deals");
-    setValue("kpi-leads",    fmtCount(h.new_leads),         "active in pipeline");
+    // new_leads is a dict {value, total, source, note} as of v3.0
+    // (was a plain number previously). Show the weekly additions and use
+    // the total as the contextual label.
+    const nl = h.new_leads || {};
+    const newLeadsVal = (typeof nl === "object") ? (nl.value ?? 0) : (nl || 0);
+    const newLeadsNote = (typeof nl === "object" && nl.total)
+      ? `of ${nl.total} in pipeline`
+      : "active in pipeline";
+    setValue("kpi-leads",    fmtCount(newLeadsVal),         newLeadsNote);
     if (h.win_rate && h.win_rate.value !== null) {
       setValue("kpi-winrate", fmtPct(h.win_rate.value),
         `${h.win_rate.closed_won} won / ${h.win_rate.closed_lost} lost`);
@@ -493,6 +502,133 @@
     `;
   }
 
+  // ── Section 1.5: HubSpot pipeline (NEW v3) ────────────────
+  // The real B2B pipeline. 244 companies, weekly additions, draft queue.
+  function renderPipeline(p) {
+    const card = el("pipeline-card");
+    if (!card) return;
+    const tag = el("pipeline-tag");
+    if (!p || !p.available) {
+      card.innerHTML = `<p class="empty-state">${p?.reason || "HubSpot pipeline data unavailable. Run build_pipeline_status.py."}</p>`;
+      if (tag) { tag.textContent = "unavailable"; tag.className = "section-tag tag-warn"; }
+      return;
+    }
+
+    const total        = p.total ?? 0;
+    const stages       = p.stages || {};
+    const drafts       = p.drafts_waiting ?? 0;
+    const bySender     = p.drafts_by_sender || {};
+    const ready        = p.ready_to_draft ?? 0;
+    const withContact  = p.with_contact ?? 0;
+    const weekly       = p.weekly_additions || [];
+    const batches      = p.batches || {};
+    const sampleDrafts = p.sample_drafts || [];
+
+    // Section tag: status summary
+    if (tag) {
+      if (drafts > 0)         { tag.textContent = `${drafts} drafts ready`; tag.className = "section-tag tag-warn"; }
+      else if (ready > 50)   { tag.textContent = `${ready} to draft`;     tag.className = "section-tag tag-warn"; }
+      else if (total > 0)    { tag.textContent = `${total} cos`;           tag.className = "section-tag tag-ok"; }
+      else                   { tag.textContent = "empty";                  tag.className = "section-tag tag-warn"; }
+    }
+
+    // Top alert — high-leverage action
+    let alert = "";
+    if (drafts > 0) {
+      alert = `<div class="fm-alert fm-alert-warn">⚠️ <strong>${drafts} draft emails are waiting in Gmail</strong> — ` +
+              `Steven: ${bySender.steven ?? 0}, Miguel: ${bySender.miguel ?? 0}. ` +
+              `None sent yet to the ${total}-company HubSpot pipeline. ` +
+              `<a href="https://mail.google.com" target="_blank" rel="noopener">Open Gmail drafts →</a></div>`;
+    } else if (ready > 0) {
+      alert = `<div class="fm-alert fm-alert-info">ℹ️ <strong>${ready} companies</strong> are ready to draft (have a HubSpot note + contact, no draft yet).</div>`;
+    }
+
+    // Stage chips
+    const stageChip = (label, val) => {
+      const n = Number(val) || 0;
+      const klass = n > 0 ? "stat-zero" : "stat-zero";
+      return `<div class="stat-block"><div class="stat-num ${klass}">${n.toLocaleString()}</div><div class="stat-label">${label}</div></div>`;
+    };
+
+    // Weekly additions sparkline (same pattern as funnel-motion)
+    const weeklySpark = (() => {
+      if (!weekly.length) return "";
+      const vals = weekly.map(w => Number(w.added) || 0);
+      const max = Math.max(1, ...vals);
+      const w = 280, h = 50, pad = 4;
+      const step = vals.length > 1 ? (w - 2 * pad) / (vals.length - 1) : 0;
+      const points = vals.map((v, i) => {
+        const x = pad + i * step;
+        const y = h - pad - (v / max) * (h - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      const polyline = `<polyline points="${points.join(' ')}" fill="none" stroke="currentColor" stroke-width="2" />`;
+      const dots = points.map(p => {
+        const [cx, cy] = p.split(",");
+        return `<circle cx="${cx}" cy="${cy}" r="3" fill="currentColor" />`;
+      }).join("");
+      return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="50" preserveAspectRatio="xMidYMid meet" class="sparkline">${polyline}${dots}</svg>`;
+    })();
+
+    // Weekly list
+    const weeklyList = weekly.length
+      ? weekly.map(w => {
+          const d = (w.week || "").slice(5);  // MM-DD
+          return `<li><span class="muted">${d}</span> — added <strong>${w.added}</strong> companies</li>`;
+        }).join("")
+      : '<li class="muted">No weekly data yet</li>';
+
+    // Batch list
+    const batchList = Object.entries(batches)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, n]) => `<li><span class="muted">${name}</span> — <strong>${n}</strong> cos</li>`)
+      .join("");
+
+    // Sample drafts
+    const draftList = sampleDrafts.length
+      ? sampleDrafts.map(d =>
+          `<li><strong>${escapeHtml(d.company || "?")}</strong> ` +
+          `<span class="muted small">[${escapeHtml(d.sender || "?")}]</span><br>` +
+          `<span class="small">${escapeHtml(d.subject || "")}</span></li>`
+        ).join("")
+      : '<li class="muted">No drafts yet</li>';
+
+    card.innerHTML = `
+      ${alert}
+      <div class="stat-row">
+        ${stageChip("Total in pipeline", total)}
+        ${stageChip("With contact",      withContact)}
+        ${stageChip("Ready to draft",    ready)}
+        ${stageChip("Drafts waiting",    drafts)}
+      </div>
+      <h4>Stages (244-company HubSpot B2B universe)</h4>
+      <div class="stat-row">
+        ${stageChip("Researched (noted)", stages.noted ?? 0)}
+        ${stageChip("Drafted, not sent",  stages.drafted_not_sent ?? 0)}
+        ${stageChip("Contacted",          stages.contacted ?? 0)}
+        ${stageChip("Active",             stages.active ?? 0)}
+        ${stageChip("Lost",               stages.lost ?? 0)}
+      </div>
+      <h4>Weekly additions</h4>
+      ${weeklySpark}
+      <ol class="fm-weeks">${weeklyList}</ol>
+      <details>
+        <summary>By batch (${Object.keys(batches).length} batches)</summary>
+        <ol class="fm-weeks">${batchList}</ol>
+      </details>
+      <details>
+        <summary>Sample of ${drafts} drafts in Gmail (${sampleDrafts.length} shown)</summary>
+        <ol class="fm-weeks">${draftList}</ol>
+      </details>
+      <p class="muted small">
+        Source: <code>leads/pipeline_master.csv</code> — regenerated by
+        <code>scripts/build_pipeline_status.py</code> from 5 HubSpot upload batches
+        (master, 06-12, 06-13, 06-17, 06-18) + <code>lead_gen_drafts_log.csv</code>.
+        File: ${escapeHtml(p.freshness || "?")}.
+      </p>
+    `;
+  }
+
   function renderCustomer(c) {
     const card = el("customer-card");
     if (!c.available) {
@@ -565,6 +701,7 @@
     renderHeadlines(kpis.headlines || {});
     renderMarketing(kpis.marketing || {});
     renderSales(kpis.sales || {});
+    renderPipeline(kpis.pipeline || {});          // NEW in v3
     renderFunnelMotion(kpis.funnel_motion || {});   // NEW in v2
     renderOutreach(kpis.outreach || {});            // NEW in v2
     renderEngagement(kpis.engagement || {});        // NEW in v2

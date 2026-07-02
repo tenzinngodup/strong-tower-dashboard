@@ -41,9 +41,10 @@ If the page is wrong, look at the four sections below in order.
 
 | Source | What it talks to | Common failure | Fix |
 |---|---|---|---|
-| `leads` | Local CSVs in `workspace/leads/*.csv` | Bad row data (e.g. `icp` column has non-standard values) or stale CSVs (>14d untouched) | Edit the CSV, re-run |
-| `leads_history` | Local `leads/email_status.csv` (SDR weekly log) | Stale log (last entry >7d ago) or frozen pipeline (no motion for 3+ weeks) | Run the SDR's weekly email-status pipeline; update the CSV |
-| `gmail` | Composio MCP → steven@ Gmail | Composio rate-limit, wrong account, GMAIL_FETCH_EMAILS pagination | Update `COMPOSIO_API_KEY` in `.env`; verify `STEVEN_ACCOUNT_ID` in `scripts/sources/gmail.py` is `gmail_deem-ultima` |
+| `leads` | Local CSVs in `workspace/leads/*.csv` (LEGACY May 2026 outreach, paused) | Bad row data (e.g. `icp` column has non-standard values) or stale CSVs (>14d untouched) | Edit the CSV, re-run. Note: CSVs are paused, not broken. The high-severity "57 days old" alert is by design. |
+| `leads_history` | Local `leads/email_status.csv` (SDR weekly log, LEGACY) | Stale log (last entry >7d ago) or frozen pipeline (no motion for 3+ weeks) | Run the SDR's weekly email-status pipeline; update the CSV. Labeled "Legacy" on the dashboard. |
+| `pipeline` | Local `leads/pipeline_master.csv` (244-company HubSpot B2B universe, v3) | `pipeline_master.csv` missing or stale | Re-run `python3 /opt/data/profiles/strong-tower/workspace/scripts/build_pipeline_status.py` to regenerate. **This is the most important source** — if it fails, the most important section of the dashboard disappears. |
+| `gmail` | Composio MCP → steven@ Gmail | Composio rate-limit, wrong account, GMAIL_FETCH_EMAILS pagination | Update `COMPOSIO_API_KEY` in `.env`; verify `STEVEN_ACCOUNT_ID` in `scripts/sources/gmail.py` is `gmail_deem-ultima`. **Note: counts LEGACY outreach, not the HubSpot pipeline.** |
 | `hubspot` | Composio MCP → HubSpot | API token rotated, account 403 | Update `COMPOSIO_API_KEY` in `.env` |
 | `hubspot_events` | Composio MCP → HubSpot (calls/meetings/emails) | Same as `hubspot`; also: per-call details currently blocked by MCP wrapper | Volume works; per-call details (duration, disposition) deferred to v2.1 |
 | `blotato` | Blotato REST API | Token expired | Update `BLOTATO_API_KEY` in `.env` |
@@ -60,6 +61,25 @@ If the page is wrong, look at the four sections below in order.
 4. If it works, the next cron run will pick up the new key.
 
 **Don't** commit the secret to git. The `.env` is gitignored. The CF token is in `.env` and is also gitignored.
+
+## 2.5. The legacy vs real pipeline (READ THIS if confused about the numbers)
+
+The dashboard has **two completely separate lead universes**. Confusing them is the #1 way to misread the dashboard.
+
+| Source | Universe | Status | What it tracks |
+|---|---|---|---|
+| `leads` + `leads_history` | **Legacy May 2026 Apollo outreach** (gyms, dental, fitness) | **PAUSED** since 2026-05-05 | 80 rows, last touched 57 days ago. The frozen-pipeline / stale-CSV alerts refer to this. |
+| `pipeline` | **Current June 2026 HubSpot B2B universe** (property managers, GCs, title, senior living) | **ACTIVE** | 244 companies uploaded in 5 batches (5/13 master, 6/12, 6/13, 6/17, 6/18). 64 drafts in Gmail, 0 sent. |
+| `gmail` | Tracks sent emails | Active | **The 73 sent in 14d are the LEGACY outreach, NOT the HubSpot pipeline.** Cross-validate with `hubspot_events` (also 73 emails) — same universe. |
+
+**Key numbers (as of 2026-07-02):**
+- 244 companies in the HubSpot pipeline
+- 179 noted (researched, no draft), 60 drafted-not-sent, 4 contacted, 1 active, 0 lost
+- 64 drafts in Gmail (60 by steven, 4 by miguel), **0 sent to the HubSpot pipeline**
+- 73 sent emails in 14d = legacy Apollo outreach (different universe)
+- 56 companies ready to draft (have a HubSpot note + a contact, no draft yet)
+
+**If the page says "0 new leads this week" but the legacy `leads/active.csv` has 45 rows:** that's correct. The 45 are the legacy universe; the 0 is the HubSpot pipeline (no new batches uploaded this week).
 
 ## 3. The page is broken (deploy error)
 
@@ -101,8 +121,10 @@ npx --yes wrangler pages deploy public --project-name=strong-tower-dashboard --b
 
 **Don't** skip the local preview. The CF deploy is fast but the round-trip is still 30+ seconds; preview locally first:
 ```bash
-cd public && python3 -m http.server 8765
-# Browser: http://localhost:8765
+# Use port 8770+ to avoid collisions with other dev servers
+cd /opt/data/profiles/strong-tower/workspace/strong-tower-dashboard/public
+python3 -m http.server 8770
+# Browser: http://localhost:8770
 ```
 
 ## 5. Enabling / disabling the cron
@@ -181,4 +203,9 @@ hermes cron list | grep strongtower-dashboard
 
 # Quick verify the live page
 curl -sS -o /dev/null -w "HTTP %{http_code}\n" https://strong-tower-dashboard.pages.dev
+
+# Regenerate the pipeline master CSV (after a new HubSpot batch, or after steven sends drafts)
+python3 /opt/data/profiles/strong-tower/workspace/scripts/build_pipeline_status.py
+# Then re-run the dashboard ingest + deploy
+/opt/data/profiles/strong-tower/workspace/strong-tower-dashboard/scripts/refresh_and_deploy.sh
 ```
