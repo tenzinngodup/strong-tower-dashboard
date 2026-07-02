@@ -237,12 +237,20 @@
     };
 
     // This-week chips. We render each as a stat-block; if delta is 0 we
-    // surface that fact explicitly (not silently as "no change").
-    const chip = (label, val, isCount = true) => {
+    // surface that fact explicitly (not silently as "no change"). Counts
+    // here are NEUTRAL by design — the dashboard doesn't know whether
+    // more "lost" is good or bad, so we don't color them green.
+    const chip = (label, val) => {
       const n = Number(val) || 0;
-      const txt = isCount ? n.toLocaleString() : n;
-      const klass = n > 0 ? "stat-pos" : (n < 0 ? "stat-neg" : "stat-zero");
-      return `<div class="stat-block"><div class="stat-num ${klass}">${txt}</div><div class="stat-label">${label}</div></div>`;
+      const klass = n > 0 ? "stat-pos" : "stat-zero";
+      return `<div class="stat-block"><div class="stat-num ${klass}">${n.toLocaleString()}</div><div class="stat-label">${label}</div></div>`;
+    };
+    // For funnel-motion's totals row we use a neutral color (always grey)
+    // because the dashboard can't interpret direction: more "lost" or
+    // more "active" is not inherently positive.
+    const neutralChip = (label, val) => {
+      const n = Number(val) || 0;
+      return `<div class="stat-block"><div class="stat-num stat-zero">${n.toLocaleString()}</div><div class="stat-label">${label}</div></div>`;
     };
 
     const weeksList = trend.length
@@ -268,10 +276,10 @@
     card.innerHTML = `
       ${alert}
       <div class="stat-row">
-        ${chip("Active",    totals.active)}
-        ${chip("Contacted", totals.contacted)}
-        ${chip("Won",       totals.won)}
-        ${chip("Lost",      totals.lost)}
+        ${neutralChip("Active",    totals.active)}
+        ${neutralChip("Contacted", totals.contacted)}
+        ${neutralChip("Won",       totals.won)}
+        ${neutralChip("Lost",      totals.lost)}
       </div>
       <h4>This week</h4>
       <div class="stat-row">

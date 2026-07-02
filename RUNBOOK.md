@@ -41,8 +41,11 @@ If the page is wrong, look at the four sections below in order.
 
 | Source | What it talks to | Common failure | Fix |
 |---|---|---|---|
-| `leads` | Local CSVs in `workspace/leads/*.csv` | Bad row data (e.g. `icp` column has non-standard values) | Edit the CSV, re-run |
+| `leads` | Local CSVs in `workspace/leads/*.csv` | Bad row data (e.g. `icp` column has non-standard values) or stale CSVs (>14d untouched) | Edit the CSV, re-run |
+| `leads_history` | Local `leads/email_status.csv` (SDR weekly log) | Stale log (last entry >7d ago) or frozen pipeline (no motion for 3+ weeks) | Run the SDR's weekly email-status pipeline; update the CSV |
+| `gmail` | Composio MCP → steven@ Gmail | Composio rate-limit, wrong account, GMAIL_FETCH_EMAILS pagination | Update `COMPOSIO_API_KEY` in `.env`; verify `STEVEN_ACCOUNT_ID` in `scripts/sources/gmail.py` is `gmail_deem-ultima` |
 | `hubspot` | Composio MCP → HubSpot | API token rotated, account 403 | Update `COMPOSIO_API_KEY` in `.env` |
+| `hubspot_events` | Composio MCP → HubSpot (calls/meetings/emails) | Same as `hubspot`; also: per-call details currently blocked by MCP wrapper | Volume works; per-call details (duration, disposition) deferred to v2.1 |
 | `blotato` | Blotato REST API | Token expired | Update `BLOTATO_API_KEY` in `.env` |
 | `ga4` | Composio MCP → GA4 | Property deleted, scope revoked | Update `COMPOSIO_API_KEY` + check GA property exists |
 

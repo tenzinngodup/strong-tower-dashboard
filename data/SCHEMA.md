@@ -11,11 +11,14 @@ This file documents every field, where it comes from, and the staleness contract
 | Source key | What it fetches | Auth | Latency budget |
 |---|---|---|---|
 | `leads` | Local CSVs in `~/workspace/leads/*.csv` | none (filesystem) | < 1s |
+| `leads_history` | Weekly pipeline motion log (`leads/email_status.csv`) | none (filesystem) | < 1s |
+| `gmail` | SDR sent emails (last 14d) — volume + bounce signal | Composio MCP (`COMPOSIO_API_KEY`) | 35-45s (20 hydrations) |
 | `hubspot` | Deals (active + archived), portal metadata | Composio MCP (`COMPOSIO_API_KEY`) | 5-15s |
+| `hubspot_events` | Calls / meetings / emails volume, last 14d | Composio MCP (`COMPOSIO_API_KEY`) | 5-10s |
 | `blotato` | Last 30d of posts, latest post per platform | REST (`BLOTATO_API_KEY`) | 2-5s |
 | `ga4` | 7d sessions, top pages, UTM-source split | Composio MCP → GA4 Data API | 5-10s |
 
-Total ingest budget: ~30s. Each source has its own 60s timeout, so a stuck call
+Total ingest budget: ~70s. Each source has its own 60s timeout, so a stuck call
 fails its own source instead of blocking the others.
 
 ## `snapshot.json` shape
@@ -75,6 +78,37 @@ fails its own source instead of blocking the others.
     "totals":     { "sessions": 21, "screenPageViews": 3 },
     "top_pages":  [ { "pagePath": "/", "sessions": 14 }, ... ],
     "by_source":  { "instagram": 3, "linkedin": 3, "blog": 0, "other": 15 }
+  },
+
+  "leads_history": {                                  // NEW in v2
+    "source": "leads_history",
+    "ok": true,
+    "fetched_at": "...",
+    "totals_current":   { "active": 45, "contacted": 26, "won": 0, "lost": 11 },
+    "this_week_delta":  { "new_active": 0, "new_contacted": 0, "sent": 0, "hubspot_new": 24 },
+    "trend_6w":         [ { "date": "2026-06-08", "active": 45, ... }, ... ],
+    "staleness":        { "frozen_pipeline": true, "days_since_last": 6, "weeks_since_outreach": 2 }
+  },
+
+  "gmail": {                                            // NEW in v2
+    "source": "gmail",
+    "ok": true,
+    "fetched_at": "...",
+    "account":            "gmail_deem-ultima",          // steven@strongtowercs.com
+    "window_days":        14,
+    "totals":             { "sent": 73, "per_day_avg": 5.2, "bounced_estimated": 0, "hydrated_sample": 20 },
+    "by_day":             [ { "date": "2026-06-29", "sent": 12 }, ... ],
+    "replies":            { "available": false, "note": "v2.1 enhancement" }
+  },
+
+  "hubspot_events": {                                   // NEW in v2
+    "source": "hubspot_events",
+    "ok": true,
+    "fetched_at": "...",
+    "window_days":  14,
+    "calls":     { "in_window": 59, "per_day": [...] },
+    "meetings":  { "in_window": 0,  "per_day": [] },
+    "emails":    { "in_window": 73, "per_day": [...] }
   }
 }
 ```
@@ -116,8 +150,37 @@ all the network sources.
     "note":      "no closed-won deals yet"
   },
   "actions": [                              // auto-generated
-    { "severity": "medium", "title": "12 leads have non-standard icp values", "source": "leads_csv", "detail": "..." }
-  ]
+    { "severity": "medium", "title": "12 leads have non-standard icp values", "source": "leads_csv", "detail": "..." },
+    { "severity": "high",   "title": "Lead CSVs are 57 days old",              "source": "leads_csv", "detail": "..." },
+    { "severity": "high",   "title": "Pipeline counts have not changed in 3+ weeks", "source": "leads_history", "detail": "..." },
+    { "severity": "high",   "title": "No walkthroughs booked in 14d",          "source": "hubspot_events", "detail": "..." }
+  ],
+  "funnel_motion": {                       // NEW in v2
+    "available":       true,
+    "totals_current":  { "active": 45, "contacted": 26, "won": 0, "lost": 11 },
+    "this_week_delta": { "new_active": 0, "new_contacted": 0, "sent": 0, "hubspot_new": 24 },
+    "trend":           [ ... ],
+    "frozen":          true,
+    "days_since_last": 6,
+    "weeks_since_outreach": 2
+  },
+  "outreach": {                            // NEW in v2
+    "available":    true,
+    "window_days":  14,
+    "sent":         73,
+    "per_day_avg":  5.2,
+    "bounced_est":  0,
+    "bounce_rate":  0.0,
+    "by_day":       [ ... ],
+    "replies_available": false
+  },
+  "engagement": {                          // NEW in v2
+    "available":   true,
+    "window_days": 14,
+    "calls":     { "in_window": 59, "per_day": [...] },
+    "meetings":  { "in_window": 0,  "per_day": [] },
+    "emails":    { "in_window": 73, "per_day": [...] }
+  }
 }
 ```
 
@@ -136,21 +199,41 @@ looking at.
 
 ## What we DON'T have (gaps to know about)
 
-1. **Engagement metrics** (likes, comments, follower counts) — Blotato's
+1. **Engagement metrics on social posts** (likes, comments, follower counts) — Blotato's
    `/posts/{id}/analytics` returns `metrics: null`. Real numbers would
    require the Instagram Graph API + LinkedIn Pages API (separate OAuth,
    separate build).
-2. **Closed deal history** — we only count active + archived; we don't pull
-   per-deal `createdate`/`closedate` yet (would be a one-line addition to
-   `DEAL_PROPERTIES` in `hubspot.py`).
-3. **Spend / CAC** — there's no ad platform wired in. To get blended CAC,
-   we'd need to add a Google Ads or Meta Ads source.
-4. **Email outreach metrics** — we count leads but not the actual
-   `sent / opened / replied` events from the SDR's Gmail. That data is
-   available via Composio Gmail; we just haven't wired it. Likely Phase 1.5.
-5. **Companies / contacts count in HubSpot** — the LIST endpoint doesn't
+2. **Per-call duration / disposition** — the HubSpot `calls` object has
+   `hs_call_duration` and `hs_call_disposition` but the Composio MCP
+   wrapper currently rejects the `properties` array parameter on
+   `HUBSPOT_READ_APAGE_OF_OBJECTS_BY_TYPE`. Volume is wired (Phase 3);
+   per-call details are blocked on the MCP wrapper fix.
+3. **Closed deal history details** — we count active + archived; per-deal
+   `createdate`/`closedate` is a one-line addition to `DEAL_PROPERTIES`
+   in `hubspot.py`.
+4. **Spend / CAC** — no ad platform wired in. To get blended CAC, we'd
+   need Google Ads or Meta Ads source.
+5. **Email reply counts** — we count sent but not replied-to events.
+   Real reply detection needs per-thread INBOX lookups (one MCP call per
+   sent message) — feasible but ~30s+ of additional ingest time. v2.1.
+6. **Companies / contacts count in HubSpot** — the LIST endpoint doesn't
    return a clean total. We can fetch a full export (~1k calls) for an
    exact count, but that's expensive. `>= 1` is what we know right now.
+
+## What we DO have now (added in v2)
+
+- **Funnel motion** (from `leads_history.csv`): weekly pipeline trend
+  over 6 weeks, frozen-pipeline detection, weeks-since-outreach signal.
+  Verified working 2026-07-02.
+- **SDR outreach volume** (from Gmail via Composio): sent count,
+  per-day bucketing, bounce estimate from hydrated sample of 20 most
+  recent. Reply count deferred to v2.1. Verified: 73 sent in 14d.
+- **HubSpot engagement events** (calls/meetings/emails): per-day volume
+  for the last 14d. Per-event details (duration, disposition) blocked
+  on MCP wrapper fix. Verified: 59 calls, 0 meetings, 73 emails.
+- **CSV staleness detector** in `leads.py`: flags when the lead CSVs
+  haven't been touched in >14 days. Verified working — currently
+  reporting 57 days old (high severity).
 
 ## How to add a new KPI
 
