@@ -44,6 +44,7 @@ def compute(snapshot: dict) -> dict:
     hs     = snapshot.get("hubspot") or {}
     bl     = snapshot.get("blotato") or {}
     ga     = snapshot.get("ga4") or {}
+    gm     = snapshot.get("gmail") or {}
 
     # ── Section 1: Headline KPIs ────────────────────────────────────────
     # 1a. Active pipeline value (USD) — straight from HubSpot.
@@ -123,6 +124,29 @@ def compute(snapshot: dict) -> dict:
             "weeks_since_outreach": staleness.get("weeks_since_outreach"),
         }
     funnel_motion = _safe(_funnel_motion, default={"available": False})
+
+    # ── Section 3.7: Outreach (NEW in v2) ───────────────────────────────
+    # Pulled from gmail.py — the SDR's actual outreach volume + bounce signal.
+    # Answers: "is the SDR sending emails? Are they bouncing? What's the cadence?"
+    def _outreach():
+        if not gm.get("ok"):
+            return {"available": False, "reason": gm.get("error", "gmail not fetched this run")}
+        totals = gm.get("totals") or {}
+        return {
+            "available":     True,
+            "window_days":   gm.get("window_days"),
+            "window_start":  gm.get("window_start"),
+            "window_end":    gm.get("window_end"),
+            "sent":          totals.get("sent", 0),
+            "per_day_avg":   totals.get("per_day_avg", 0),
+            "bounced_est":   totals.get("bounced_estimated", 0),
+            "bounce_rate":   round(totals.get("bounced_sampled", 0) /
+                                   max(1, totals.get("hydrated_sample", 1)) * 100, 1),
+            "by_day":        gm.get("by_day", []),
+            "replies_available": (gm.get("replies") or {}).get("available", False),
+            "replies_note":  (gm.get("replies") or {}).get("note", ""),
+        }
+    outreach = _safe(_outreach, default={"available": False})
 
     # ── Section 4: Customer / operations ────────────────────────────────
     # "Active accounts" + MRR come from HubSpot deals. We don't have that
@@ -235,6 +259,7 @@ def compute(snapshot: dict) -> dict:
             "funnel":    funnel,
         },
         "funnel_motion": funnel_motion,   # NEW in v2
+        "outreach":      outreach,        # NEW in v2
         "customer":  customer,
         "actions":   actions,
     }

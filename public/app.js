@@ -304,6 +304,91 @@
     `;
   }
 
+  // ── Outreach (NEW in v2) ───────────────────────────────────────
+  // Renders SDR sent-email volume + bounce signal from the Gmail source.
+  function renderOutreach(o) {
+    const card = el("outreach-card");
+    const tag = el("outreach-tag");
+    if (!card) return;
+    if (!o || !o.available) {
+      card.innerHTML = `<p class="empty-state">${o?.reason || "Outreach data unavailable."}</p>`;
+      if (tag) { tag.textContent = "unavailable"; tag.className = "section-tag tag-warn"; }
+      return;
+    }
+    const sent = Number(o.sent) || 0;
+    const perDay = Number(o.per_day_avg) || 0;
+    const bounced = Number(o.bounced_est) || 0;
+    const bounceRate = Number(o.bounce_rate) || 0;
+    const byDay = o.by_day || [];
+
+    // Tag reflects state
+    if (tag) {
+      if (sent === 0)              { tag.textContent = "no sends"; tag.className = "section-tag tag-warn"; }
+      else if (bounceRate > 5)     { tag.textContent = "high bounce"; tag.className = "section-tag tag-warn"; }
+      else                          { tag.textContent = "active"; tag.className = "section-tag tag-ok"; }
+    }
+
+    // Sparkline of per-day sends
+    const spark = (() => {
+      if (!byDay.length) return "";
+      const vals = byDay.map(d => Number(d.sent) || 0);
+      const max = Math.max(1, ...vals);
+      const w = 280, h = 60, pad = 4;
+      const step = vals.length > 1 ? (w - 2 * pad) / (vals.length - 1) : 0;
+      const points = vals.map((v, i) => {
+        const x = pad + i * step;
+        const y = h - pad - (v / max) * (h - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      const polyline = `<polyline points="${points.join(' ')}" fill="none" stroke="currentColor" stroke-width="2" />`;
+      const dots = points.map(p => {
+        const [cx, cy] = p.split(",");
+        return `<circle cx="${cx}" cy="${cy}" r="3" fill="currentColor" />`;
+      }).join("");
+      return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="60" preserveAspectRatio="xMidYMid meet" class="sparkline">${polyline}${dots}</svg>`;
+    })();
+
+    const chip = (label, val) => {
+      const n = Number(val) || 0;
+      const klass = n > 0 ? "stat-pos" : "stat-zero";
+      return `<div class="stat-block"><div class="stat-num ${klass}">${n.toLocaleString()}</div><div class="stat-label">${label}</div></div>`;
+    };
+
+    const daysList = byDay.length
+      ? byDay.map(d => {
+          const date = d.date || "";
+          return `<li><span class="muted">${date}</span> — <strong>${d.sent}</strong> sent</li>`;
+        }).join("")
+      : '<li class="muted">No sends in window (only 20 most recent hydrated for the sparkline)</li>';
+
+    let replyNote = "";
+    if (!o.replies_available) {
+      replyNote = `<p class="muted small">ℹ️ ${o.replies_note || "Reply counts not yet wired (v2.1)."}</p>`;
+    }
+
+    card.innerHTML = `
+      <div class="stat-row">
+        ${chip(`Sent (${o.window_days || 14}d)`, sent)}
+        ${chip("Per day avg", perDay)}
+        ${chip("Bounced (est)", bounced)}
+        ${chip("Bounce rate", `${bounceRate}%`)}
+      </div>
+      <h4>By day (hydrated sample of 20 most recent)</h4>
+      <div class="sparkline-row">
+        <div class="sparkline-block">
+          <div class="sparkline-label">sends / day</div>
+          ${spark}
+        </div>
+      </div>
+      <details>
+        <summary>Days with sends</summary>
+        <ol class="fm-weeks">${daysList}</ol>
+      </details>
+      <p class="muted small">Source: <code>steven@strongtowercs.com</code> (Composio → Gmail API) — ${o.window_start} to ${o.window_end}.</p>
+      ${replyNote}
+    `;
+  }
+
   function renderCustomer(c) {
     const card = el("customer-card");
     if (!c.available) {
@@ -377,6 +462,7 @@
     renderMarketing(kpis.marketing || {});
     renderSales(kpis.sales || {});
     renderFunnelMotion(kpis.funnel_motion || {});   // NEW in v2
+    renderOutreach(kpis.outreach || {});            // NEW in v2
     renderCustomer(kpis.customer || {});
     renderActions(kpis.actions || []);
   }

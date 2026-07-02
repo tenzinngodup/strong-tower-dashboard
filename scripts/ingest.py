@@ -46,6 +46,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 SOURCES = [
     "leads",           # file: scripts/sources/leads.py
     "leads_history",   # file: scripts/sources/leads_history.py  (weekly motion log)
+    "gmail",           # file: scripts/sources/gmail.py  (SDR outreach via Composio)
     "hubspot",
     "blotato",
     "ga4",
