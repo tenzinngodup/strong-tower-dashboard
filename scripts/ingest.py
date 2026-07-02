@@ -50,6 +50,8 @@ SOURCES = [
     "gmail",           # file: scripts/sources/gmail.py  (SDR outreach via Composio)
     "hubspot",         # file: scripts/sources/hubspot.py  (deals)
     "hubspot_events",  # file: scripts/sources/hubspot_events.py  (calls/meetings/emails)
+    "phone_call",      # file: scripts/sources/phone_call.py  (Zoom Phone log — 245 dials, 30d)
+    "phone",           # file: scripts/sources/phone.py  (call→contact matches, per-company)
     "blotato",
     "ga4",
 ]

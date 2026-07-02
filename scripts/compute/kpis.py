@@ -44,6 +44,8 @@ def compute(snapshot: dict) -> dict:
     pipe   = snapshot.get("pipeline") or {}    # NEW v3: HubSpot B2B pipeline
     hs     = snapshot.get("hubspot") or {}
     hse    = snapshot.get("hubspot_events") or {}
+    pc     = snapshot.get("phone_call") or {}   # NEW v3.5: Zoom Phone log (gross volume)
+    ph     = snapshot.get("phone") or {}        # NEW v3.1: per-company call attribution
     bl     = snapshot.get("blotato") or {}
     ga     = snapshot.get("ga4") or {}
     gm     = snapshot.get("gmail") or {}
@@ -197,6 +199,7 @@ def compute(snapshot: dict) -> dict:
             "with_contact":      pipe.get("with_contact", 0),
             "with_note":         pipe.get("with_note", 0),
             "stages":            stages,
+            "by_person":         pipe.get("by_person", {}),  # NEW v3.1
             "ready_to_draft":    pipe.get("ready_to_draft", 0),
             "drafts_waiting":    pipe.get("drafts_waiting", 0),
             "drafts_by_sender":  pipe.get("drafts_by_sender", {}),
@@ -208,6 +211,87 @@ def compute(snapshot: dict) -> dict:
             "note":              "HubSpot B2B pipeline. Legacy May 2026 Apollo outreach is paused — see 'funnel_motion' section.",
         }
     pipeline = _safe(_pipeline, default={"available": False})
+
+    # ── Section 3.10: Phone calls (NEW v3.5) ─────────────────────────
+    # Pulled from phone_call.py — the Zoom Phone export. Answers: "is the
+    # SDR actually dialing leads, what's the connect rate, how many unique
+    # numbers did we reach?"
+    #
+    # The Zoom export masks last 4 digits of callee phone numbers, so we
+    # CANNOT match callee numbers to HubSpot companies without fetching
+    # HubSpot contact phone numbers via Composio MCP (plan B). The
+    # `rough_calls_connected_estimate` is the upper bound.
+    def _phone_call():
+        if not pc.get("ok"):
+            return {"available": False, "reason": pc.get("error", "phone_call not fetched this run")}
+        return {
+            "available":         True,
+            "total_dials":       pc.get("total_dials", 0),
+            "connected":         pc.get("connected", 0),
+            "failed":            pc.get("failed", 0),
+            "connect_rate":      pc.get("connect_rate", 0.0),
+            "total_talk_min":    pc.get("total_talk_min", 0),
+            "avg_call_sec":      pc.get("avg_call_sec", 0),
+            "unique_callees":    pc.get("unique_callees", 0),
+            "unique_connected":  pc.get("unique_connected", 0),
+            "rough_calls_connected_estimate": pc.get("rough_calls_connected_estimate", 0),
+            "last_7d_dials":     pc.get("last_7d_dials", 0),
+            "last_7d_connected": pc.get("last_7d_connected", 0),
+            "last_30d_dials":    pc.get("last_30d_dials", 0),
+            "last_30d_connected": pc.get("last_30d_connected", 0),
+            "per_day_14d":       pc.get("per_day_14d", []),
+            "result_breakdown":  pc.get("result_breakdown", {}),
+            "date_range":        pc.get("date_range", {}),
+            "freshness":         pc.get("freshness", ""),
+            "file_age_hours":    pc.get("file_age_hours"),
+            "note":              pc.get("note", ""),
+        }
+    phone_call = _safe(_phone_call, default={"available": False})
+
+    # ── Section 3.11: Phone (per-company attribution) (NEW v3.1) ───────
+    # Pulled from phone.py — the matched-call table. Answers: "which HubSpot
+    # companies did the SDR actually reach by phone, and how often?"
+    # Unlike phone_call.py (gross volume), this rolls up by company_id.
+    def _phone_per_company():
+        if not ph.get("ok"):
+            return {"available": False, "reason": ph.get("error", "phone not fetched this run")}
+        return {
+            "available":           True,
+            "total_calls":         ph.get("total_calls", 0),    # 245
+            "total_matched":       ph.get("total_matched", 0),  # 147
+            "unmatched_calls":     ph.get("unmatched_calls", 0),# 98
+            "unmatched_connected": ph.get("unmatched_connected", 0),
+            "unmatched_failed":    ph.get("unmatched_failed", 0),
+            "connected_matched":   ph.get("connected_matched", 0),
+            "unique_companies":    ph.get("unique_companies", 0),
+            "unique_contacts":     ph.get("unique_contacts", 0),
+            "steven_calls":        ph.get("steven_calls", 0),
+            "caller_line_owner":   ph.get("caller_line_owner", ""),
+            "note_attribution":    ph.get("note_attribution", ""),
+            "top_companies":       ph.get("top_companies", [])[:25],
+            "all_companies_count": ph.get("all_companies_count", 0),
+            "freshness_hours":     ph.get("freshness_hours"),
+            "result_breakdown":    ph.get("result_breakdown", {}),
+        }
+    phone_per_company = _safe(_phone_per_company, default={"available": False})
+
+    # ── Section 3.12: Outreach by person (NEW v3.1) ────────────────────
+    # Cross-cuts the pipeline (stages) × who-did-it (steven/heber) × channel
+    # (email/call/draft). This is the unified view of the 244-pipeline that
+    # answers: "who is doing what, and what's left?"
+    def _outreach_by_person():
+        # Pull from the pipeline source's per-person columns
+        if not pipe.get("ok"):
+            return {"available": False, "reason": "pipeline not fetched"}
+        stages = pipe.get("stages") or {}
+        by_person = pipe.get("by_person") or {}
+        return {
+            "available":        True,
+            "stages":           stages,
+            "by_person":        by_person,
+            "note":             "Steven = SDR. Heber = manager. Heber's drafts go to legacy gym/dental list (NOT the 244-pipeline).",
+        }
+    outreach_by_person = _safe(_outreach_by_person, default={"available": False})
 
     # ── Section 4: Customer / operations ────────────────────────────────
     # "Active accounts" + MRR come from HubSpot deals. We don't have that
@@ -235,44 +319,74 @@ def compute(snapshot: dict) -> dict:
         # These override or accompany the legacy alerts below.
 
         pl = pipeline if isinstance(pipeline, dict) else {}
+        phc = phone_call if isinstance(phone_call, dict) else {}
 
-        # 1. Drafts are sitting in Gmail, never sent.
-        if pl.get("available") and pl.get("drafts_waiting", 0) > 0:
-            drafts = pl["drafts_waiting"]
-            by_sender = pl.get("drafts_by_sender", {})
-            steven = by_sender.get("steven", 0)
-            miguel = by_sender.get("miguel", 0)
-            items.append({
-                "severity": "high",
-                "title":    f"{drafts} draft emails are waiting in Gmail (not sent)",
-                "detail":   f"Steven: {steven} drafts, Miguel: {miguel} drafts. All {drafts} are sitting in Gmail drafts — "
-                            "none have been sent to the 244-company HubSpot pipeline. This is the highest-leverage "
-                            "action the SDR can take right now.",
-                "source":   "pipeline",
-            })
+        # 1. HubSpot pipeline has actual contacted leads now (NEW v3.1).
+        # Use the 3-channel contacted total: contacted_both + contacted_email_only + contacted_call_only.
+        if pl.get("available"):
+            pl_stages = pl.get("stages", {}) or {}
+            contacted_n = (pl_stages.get("contacted_both", 0) or 0) + \
+                          (pl_stages.get("contacted_email_only", 0) or 0) + \
+                          (pl_stages.get("contacted_call_only", 0) or 0)
+            if contacted_n > 0:
+                total = pl.get("total", 0)
+                items.append({
+                    "severity": "high" if contacted_n < total * 0.20 else "medium",
+                    "title":    f"{contacted_n} of {total} HubSpot leads contacted (26% milestone)",
+                    "detail":   f"Real contacted count (from leads/contacted_signals.csv — Steven's sent emails + Zoom calls matched to companies). "
+                                f"Split: {pl_stages.get('contacted_both', 0)} both, {pl_stages.get('contacted_email_only', 0)} email only, {pl_stages.get('contacted_call_only', 0)} call only. "
+                                f"Still 0 have advanced past 'lead' lifecycle. "
+                                f"Target: 25% of pipeline contacted = {round(total * 0.25)} (you need {max(0, round(total * 0.25) - contacted_n)} more touches).",
+                    "source":   "pipeline",
+                })
 
-        # 2. Companies ready to draft (have note + contact, no draft).
+        # 2. Companies ready to draft (have note + contact, no draft, no contact yet).
         if pl.get("available") and pl.get("ready_to_draft", 0) > 0:
             ready = pl["ready_to_draft"]
             items.append({
                 "severity": "medium",
                 "title":    f"{ready} companies are ready to draft (researched + have a contact)",
-                "detail":   f"These companies have a HubSpot note and a contact, but no email draft. "
+                "detail":   f"These companies have a HubSpot note and a contact, but no email draft yet. "
                             f"Steven can work through this queue at ~5-10 per day.",
                 "source":   "pipeline",
             })
 
-        # 3. HubSpot pipeline has 0 sent emails — explicit confirmation.
-        if pl.get("available"):
-            items.append({
-                "severity": "low",
-                "title":    "0 emails sent from the 244-company HubSpot pipeline",
-                "detail":   f"All 244 companies are still pre-send. {pl.get('drafts_waiting', 0)} drafts in Gmail, "
-                            f"{pl.get('ready_to_draft', 0)} companies ready to draft. "
-                            f"The {pl.get('total', 0)} companies here are the real B2B pipeline; "
-                            f"the 73 emails sent in the last 14d were to the legacy Apollo list (see Outreach).",
-                "source":   "pipeline",
-            })
+        # 3. Phone activity is happening and now attributed to companies (v3.1).
+        # The phone_per_company source matches Zoom calls to HubSpot contacts
+        # via E.164 normalization. v3.5 had a "rough estimate"; v3.1 has
+        # actual company attribution.
+        if phc.get("available") and phc.get("total_dials", 0) > 0:
+            dials = phc["total_dials"]
+            connected = phc.get("connected", 0)
+            # Per-company attribution (v3.1.1: honest 60% match)
+            phc_companies = phone_per_company if isinstance(phone_per_company, dict) else {}
+            if phc_companies.get("available") and phc_companies.get("unique_companies", 0) > 0:
+                comp = phc_companies["unique_companies"]
+                comp_connected = phc_companies.get("connected_matched", 0)
+                # v3.1.1: surface the 40% gap honestly
+                matched = phc_companies.get("total_matched", 0)
+                unmatched = phc_companies.get("unmatched_calls", 0)
+                unmatch_conn = phc_companies.get("unmatched_connected", 0)
+                match_pct = dials and round(100 * matched / dials) or 0
+                items.append({
+                    "severity": "medium",
+                    "title":    f"Phone: {comp_connected} connected of {dials} dials → {comp} HubSpot companies ({match_pct}% match)",
+                    "detail":   f"Per-company attribution (v3.1.1): {matched} of {dials} outbound calls matched a HubSpot contact ({match_pct}%). "
+                                f"{unmatched} did not match — of those, {unmatch_conn} connected (real conversations with people NOT in HubSpot) and {unmatched-phc_companies.get('unmatched_failed', 0)} failed. "
+                                f"The 40% gap is mostly Steven working from a phone list that hasn't been imported into HubSpot (78% of unmatched are 503 Portland numbers). "
+                                f"Zoom line owner: {phc_companies.get('caller_line_owner', '?')}. Connect rate (gross): {phc.get('connect_rate', 0):.0f}%.",
+                    "source":   "phone_per_company",
+                })
+            else:
+                items.append({
+                    "severity": "medium",
+                    "title":    f"Phone: {connected} connected of {dials} dials ({phc.get('connect_rate', 0):.0f}% pick-up)",
+                    "detail":   f"From leads/phone_call_log.csv (Zoom Phone export). Per-company attribution pending — "
+                                f"callee numbers are masked (+150****XXXX) in the Zoom export, so we can't link "
+                                f"specific calls to specific HubSpot companies until we fetch HubSpot contact "
+                                f"phone numbers via Composio MCP. Plan B is in progress.",
+                    "source":   "phone_call",
+                })
 
         # Data quality: icp drift rows indicate CSV is dirty.
         dq = (leads.get("data_quality") or {})
@@ -391,7 +505,10 @@ def compute(snapshot: dict) -> dict:
         "funnel_motion": funnel_motion,   # NEW in v2
         "outreach":      outreach,        # NEW in v2
         "engagement":    engagement,      # NEW in v2
-        "pipeline":      pipeline,        # NEW in v3
+        "pipeline":      pipeline,        # NEW v3
+        "phone_call":    phone_call,      # NEW v3.5
+        "phone_per_company": phone_per_company,  # NEW v3.1
+        "outreach_by_person": outreach_by_person,  # NEW v3.1
         "customer":  customer,
         "actions":   actions,
     }

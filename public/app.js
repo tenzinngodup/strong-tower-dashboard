@@ -524,23 +524,38 @@
     const batches      = p.batches || {};
     const sampleDrafts = p.sample_drafts || [];
 
-    // Section tag: status summary
+    // Section tag: status summary (v3.5: contacted is now the headline)
     if (tag) {
-      if (drafts > 0)         { tag.textContent = `${drafts} drafts ready`; tag.className = "section-tag tag-warn"; }
-      else if (ready > 50)   { tag.textContent = `${ready} to draft`;     tag.className = "section-tag tag-warn"; }
-      else if (total > 0)    { tag.textContent = `${total} cos`;           tag.className = "section-tag tag-ok"; }
-      else                   { tag.textContent = "empty";                  tag.className = "section-tag tag-warn"; }
+      const contactedTotal = (stages.contacted_both ?? 0) + (stages.contacted_email_only ?? 0) + (stages.contacted_call_only ?? 0);
+      if (contactedTotal > 0) {
+        tag.textContent = `${contactedTotal} contacted`;
+        tag.className = "section-tag tag-ok";
+      } else if (stages.noted && stages.noted > 50) {
+        tag.textContent = `${stages.noted} noted`;
+        tag.className = "section-tag tag-warn";
+      } else if (total > 0) {
+        tag.textContent = `${total} cos`;
+        tag.className = "section-tag tag-ok";
+      } else {
+        tag.textContent = "empty";
+        tag.className = "section-tag tag-warn";
+      }
     }
 
-    // Top alert — high-leverage action
+    // Top alert — leads steven has actually contacted (v3.5)
     let alert = "";
-    if (drafts > 0) {
-      alert = `<div class="fm-alert fm-alert-warn">⚠️ <strong>${drafts} draft emails are waiting in Gmail</strong> — ` +
-              `Steven: ${bySender.steven ?? 0}, Miguel: ${bySender.miguel ?? 0}. ` +
-              `None sent yet to the ${total}-company HubSpot pipeline. ` +
-              `<a href="https://mail.google.com" target="_blank" rel="noopener">Open Gmail drafts →</a></div>`;
-    } else if (ready > 0) {
-      alert = `<div class="fm-alert fm-alert-info">ℹ️ <strong>${ready} companies</strong> are ready to draft (have a HubSpot note + contact, no draft yet).</div>`;
+    const contactedTotal = (stages.contacted_both ?? 0) + (stages.contacted_email_only ?? 0) + (stages.contacted_call_only ?? 0);
+    if (contactedTotal > 0) {
+      const remaining = Math.max(0, Math.round(total * 0.25) - contactedTotal);
+      alert = `<div class="fm-alert fm-alert-info">✅ <strong>${contactedTotal} of ${total} companies contacted</strong> ` +
+              `(${Math.round(100 * contactedTotal / total)}% of pipeline, target 25% = ${Math.round(total * 0.25)}). ` +
+              (remaining > 0
+                ? `${remaining} more touches needed to hit the 25% milestone.`
+                : `<strong>25% milestone hit.</strong>`) +
+              `</div>`;
+    } else if (stages.noted && stages.noted > 0) {
+      alert = `<div class="fm-alert fm-alert-warn">ℹ️ <strong>${stages.noted} companies</strong> are researched but not yet contacted. ` +
+              `Steven can draft and send at ~5-10 per day.</div>`;
     }
 
     // Stage chips
@@ -604,9 +619,11 @@
       <h4>Stages (244-company HubSpot B2B universe)</h4>
       <div class="stat-row">
         ${stageChip("Researched (noted)", stages.noted ?? 0)}
-        ${stageChip("Drafted, not sent",  stages.drafted_not_sent ?? 0)}
-        ${stageChip("Contacted",          stages.contacted ?? 0)}
-        ${stageChip("Active",             stages.active ?? 0)}
+        ${stageChip("Contacted (both)",   stages.contacted_both ?? 0)}
+        ${stageChip("Contacted (email)",  stages.contacted_email_only ?? 0)}
+        ${stageChip("Contacted (call)",   stages.contacted_call_only ?? 0)}
+        ${stageChip("Drafted (not sent)", stages.drafted ?? 0)}
+        ${stageChip("Active (legacy)",    stages.active ?? 0)}
         ${stageChip("Lost",               stages.lost ?? 0)}
       </div>
       <h4>Weekly additions</h4>
@@ -626,6 +643,258 @@
         (master, 06-12, 06-13, 06-17, 06-18) + <code>lead_gen_drafts_log.csv</code>.
         File: ${escapeHtml(p.freshness || "?")}.
       </p>
+    `;
+  }
+
+  // ── Section 1.52: Outreach by person (NEW v3.1) ───────────
+  // Steven (SDR) vs Heber (manager). Per-stage breakdown × per-person.
+  // The "outreach_by_person" section pulls from the same pipeline data but
+  // slices it by WHO DID the outreach, not just WHO was contacted.
+  function renderOutreachByPerson(p) {
+    const card = el("obp-card");
+    if (!card) return;
+    const tag = el("obp-tag");
+    if (!p || !p.available) {
+      card.innerHTML = `<p class="empty-state">${p?.reason || "Pipeline data unavailable."}</p>`;
+      if (tag) { tag.textContent = "unavailable"; tag.className = "section-tag tag-warn"; }
+      return;
+    }
+    const stages  = p.stages || {};
+    const byPerson = p.by_person || {};
+    const s = byPerson.steven || {};
+    const h = byPerson.heber || {};
+    const total = (Object.values(stages).reduce((a, b) => a + (Number(b) || 0), 0)) || 0;
+
+    // Per-person stat row
+    const sTouched = s.total_touched ?? 0;
+    const hTouched = h.total_touched ?? 0;
+    const totalTouched = sTouched + hTouched;
+    const sPct = total ? Math.round(100 * sTouched / total) : 0;
+    const hPct = total ? Math.round(100 * hTouched / total) : 0;
+
+    // Tag
+    if (tag) {
+      if (sTouched > 0 && hTouched > 0) {
+        tag.textContent = `steven ${sTouched} / heber ${hTouched}`;
+        tag.className = "section-tag tag-ok";
+      } else if (sTouched > 0) {
+        tag.textContent = `steven ${sTouched} (sole)`;
+        tag.className = "section-tag tag-ok";
+      } else {
+        tag.textContent = "none contacted";
+        tag.className = "section-tag tag-warn";
+      }
+    }
+
+    // Stage chips (the 6-stage vocabulary)
+    const chip = (label, val) => {
+      const n = Number(val) || 0;
+      return `<div class="stat-block"><div class="stat-num">${n.toLocaleString()}</div><div class="stat-label">${label}</div></div>`;
+    };
+
+    // Top companies called list
+    const topCalled = p.top_companies || [];
+
+    card.innerHTML = `
+      <div class="stat-row">
+        ${chip("Total pipeline", total)}
+        ${chip("Contacted (any)", (stages.contacted_both ?? 0) + (stages.contacted_email_only ?? 0) + (stages.contacted_call_only ?? 0))}
+        ${chip("Drafted (not sent)", stages.drafted ?? 0)}
+        ${chip("Noted only", stages.noted ?? 0)}
+      </div>
+      <h4>Steven (SDR)</h4>
+      <div class="stat-row">
+        ${chip("Emailed", s.emailed ?? 0)}
+        ${chip("Drafted", s.drafted ?? 0)}
+        ${chip("Called",  s.called ?? 0)}
+        ${chip("Total touched", sTouched)}
+        ${chip(`% of pipeline`, `${sPct}%`)}
+      </div>
+      <h4>Heber (manager)</h4>
+      <div class="stat-row">
+        ${chip("Emailed", h.emailed ?? 0)}
+        ${chip("Drafted", h.drafted ?? 0)}
+        ${chip("Total touched", hTouched)}
+        ${chip(`% of pipeline`, `${hPct}%`)}
+      </div>
+      <p class="muted small">
+        ${escapeHtml(p.note || "")}
+        Heber's drafts go to the <em>legacy</em> gym/dental list (not the 244 HubSpot pipeline).
+        His 36 sent emails + 3 replies + 21 bounced (manual stat) are to legacy Apollo outreach (paused May 2026).
+      </p>
+    `;
+  }
+
+  // ── Section 1.54: Phone — per company (NEW v3.1) ─────────
+  // Per-company call attribution from call_to_contact_matches.csv.
+  // Companion to renderPhoneCall (gross volume). Shows the actual HubSpot
+  // companies steven reached.
+  function renderPhonePerCompany(p) {
+    const card = el("ppc-card");
+    if (!card) return;
+    const tag = el("ppc-tag");
+    if (!p || !p.available) {
+      card.innerHTML = `<p class="empty-state">${p?.reason || "Per-company phone data unavailable. Run leads/match_calls.py."}</p>`;
+      if (tag) { tag.textContent = "unavailable"; tag.className = "section-tag tag-warn"; }
+      return;
+    }
+    const total          = p.total_calls ?? 0;
+    const matched        = p.total_matched ?? 0;
+    const unmatched      = p.unmatched_calls ?? 0;
+    const connected      = p.connected_matched ?? 0;
+    const unmatchConn    = p.unmatched_connected ?? 0;
+    const unmatchFailed  = p.unmatched_failed ?? 0;
+    const companies      = p.unique_companies ?? 0;
+    const contacts       = p.unique_contacts ?? 0;
+    const stevenCalls    = p.steven_calls ?? 0;
+    const lineOwner      = p.caller_line_owner || "—";
+    const topCompanies   = p.top_companies || [];
+    const note           = p.note_attribution || "";
+    const freshnessH     = p.freshness_hours;
+    const matchPct       = total ? Math.round(100 * matched / total) : 0;
+
+    if (tag) {
+      if (companies > 0) {
+        tag.textContent = `${companies} cos called (${matchPct}% match)`;
+        tag.className = "section-tag tag-ok";
+      } else {
+        tag.textContent = "0 matched";
+        tag.className = "section-tag tag-warn";
+      }
+    }
+
+    // Top 25 companies called (table)
+    const rows = topCompanies.map(c => {
+      const cName = escapeHtml(c.company_name || "?");
+      const cPerson = escapeHtml(c.contact_name || "?");
+      const cEmail  = c.contact_email ? escapeHtml(c.contact_email) : "<em class='muted'>no email</em>";
+      return `<tr>
+        <td>${cName}</td>
+        <td>${cPerson}</td>
+        <td class="small">${cEmail}</td>
+        <td class="num">${c.call_count}</td>
+        <td class="num">${c.connected_count}</td>
+        <td class="small muted">${escapeHtml((c.first_call || "").slice(0, 10))}</td>
+        <td class="small muted">${escapeHtml((c.last_call || "").slice(0, 10))}</td>
+      </tr>`;
+    }).join("");
+
+    card.innerHTML = `
+      <p class="muted small">${escapeHtml(note)}</p>
+      <div class="stat-row">
+        <div class="stat-block"><div class="stat-num">${total.toLocaleString()}</div><div class="stat-label">Total outbound</div></div>
+        <div class="stat-block"><div class="stat-num">${matched.toLocaleString()}</div><div class="stat-label">Matched (${matchPct}%)</div></div>
+        <div class="stat-block"><div class="stat-num">${unmatched.toLocaleString()}</div><div class="stat-label">Unmatched (40%)</div></div>
+        <div class="stat-block"><div class="stat-num">${companies.toLocaleString()}</div><div class="stat-label">Unique companies</div></div>
+        <div class="stat-block"><div class="stat-num">${contacts.toLocaleString()}</div><div class="stat-label">Unique contacts</div></div>
+      </div>
+      <details>
+        <summary>Why the 40% gap? <span class="muted small">(${unmatchConn} unmatched-but-connected + ${unmatchFailed} failed = ${unmatched} total)</span></summary>
+        <p class="small">
+          Of the ${unmatched} unmatched outbound calls, ${unmatchConn} connected and ${unmatchFailed} failed.
+          The connected-but-unmatched calls are real conversations with people whose phone numbers aren't in HubSpot.
+          See <code>leads/UNMATCHED_CALLS_ANALYSIS.md</code> for the area-code breakdown (78% of unmatched are
+          Portland-local 503 numbers — Steven was working from a phone list that hasn't been imported into HubSpot).
+        </p>
+      </details>
+      <p class="muted small">Zoom line owner: <code>${escapeHtml(lineOwner)}</code> (ext 800) — actual dialer: steven.</p>
+      <details${topCompanies.length > 10 ? " open" : ""}>
+        <summary>Top ${topCompanies.length} companies by call count (of ${p.all_companies_count} matched total)</summary>
+        <table class="data-table">
+          <thead>
+            <tr><th>Company</th><th>Contact</th><th>Email</th><th class="num">Calls</th><th class="num">Connected</th><th>First</th><th>Last</th></tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="7" class="muted">No matched companies yet</td></tr>'}</tbody>
+        </table>
+      </details>
+      <p class="muted small">Source: <code>leads/call_to_contact_matches.csv</code> — built by
+        <code>leads/match_calls.py</code> via E.164 normalization.
+        ${freshnessH != null ? `File: ${freshnessH}h old.` : ""}
+      </p>
+    `;
+  }
+
+  // ── Section 1.55: Phone calls (NEW v3.5) ────────────────
+  // The Zoom Phone log. Total dials, connect rate, per-day sparkline.
+  // Per-company attribution is pending (Zoom masks last-4 of callee).
+  function renderPhoneCall(p) {
+    const card = el("phone-call-card");
+    if (!card) return;
+    const tag = el("phone-call-tag");
+    if (!p || !p.available) {
+      card.innerHTML = `<p class="empty-state">${p?.reason || "Phone call data unavailable. Add leads/phone_call_log.csv."}</p>`;
+      if (tag) { tag.textContent = "unavailable"; tag.className = "section-tag tag-warn"; }
+      return;
+    }
+
+    const total          = p.total_dials ?? 0;
+    const connected      = p.connected ?? 0;
+    const connectRate    = p.connect_rate ?? 0;
+    const totalTalkMin   = p.total_talk_min ?? 0;
+    const avgCallSec     = p.avg_call_sec ?? 0;
+    const uniqueCallees  = p.unique_callees ?? 0;
+    const uniqueConnected = p.unique_connected ?? 0;
+    const last7Dials     = p.last_7d_dials ?? 0;
+    const last30Dials    = p.last_30d_dials ?? 0;
+    const perDay         = p.per_day_14d || [];
+    const resultBd       = p.result_breakdown || {};
+    const dateRange      = p.date_range || {};
+
+    // Section tag
+    if (tag) {
+      if (total === 0)            { tag.textContent = "no data";     tag.className = "section-tag tag-warn"; }
+      else if (connectRate >= 80) { tag.textContent = "high pickup"; tag.className = "section-tag tag-ok"; }
+      else if (connectRate >= 60) { tag.textContent = "active";      tag.className = "section-tag tag-ok"; }
+      else                        { tag.textContent = "low pickup";  tag.className = "section-tag tag-warn"; }
+    }
+
+    // Per-day sparkline
+    const spark = (() => {
+      if (!perDay.length) return "";
+      const vals = perDay.map(d => Number(d.dials) || 0);
+      const max = Math.max(1, ...vals);
+      const w = 280, h = 50, pad = 4;
+      const step = vals.length > 1 ? (w - 2 * pad) / (vals.length - 1) : 0;
+      const points = vals.map((v, i) => {
+        const x = pad + i * step;
+        const y = h - pad - (v / max) * (h - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      const polyline = `<polyline points="${points.join(' ')}" fill="none" stroke="currentColor" stroke-width="2" />`;
+      const dots = points.map(p => {
+        const [cx, cy] = p.split(",");
+        return `<circle cx="${cx}" cy="${cy}" r="3" fill="currentColor" />`;
+      }).join("");
+      return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="50" preserveAspectRatio="xMidYMid meet" class="sparkline">${polyline}${dots}</svg>`;
+    })();
+
+    // Result breakdown chips
+    const resultChips = Object.entries(resultBd)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `<span class="chip chip-neutral">${escapeHtml(k)}: ${v}</span>`)
+      .join(" ");
+
+    card.innerHTML = `
+      <div class="stat-row">
+        <div class="stat-block"><div class="stat-num">${total.toLocaleString()}</div><div class="stat-label">Total dials (30d)</div></div>
+        <div class="stat-block"><div class="stat-num">${connected.toLocaleString()}</div><div class="stat-label">Connected</div></div>
+        <div class="stat-block"><div class="stat-num stat-pos">${connectRate}%</div><div class="stat-label">Connect rate</div></div>
+        <div class="stat-block"><div class="stat-num">${totalTalkMin.toFixed(0)}m</div><div class="stat-label">Total talk time</div></div>
+        <div class="stat-block"><div class="stat-num">${avgCallSec}s</div><div class="stat-label">Avg call length</div></div>
+      </div>
+      <h4>Per-day dials (last 14d)</h4>
+      ${spark}
+      <p class="muted small">Date range: ${escapeHtml(dateRange.first || "?")} → ${escapeHtml(dateRange.last || "?")}. Last 7d: ${last7Dials} dials. Source: leads/phone_call_log.csv (Zoom Phone export).</p>
+      <h4>Result breakdown</h4>
+      <p>${resultChips || '<span class="muted">no data</span>'}</p>
+      <div class="fm-alert fm-alert-warn">
+        <strong>Rough estimate:</strong> ${uniqueConnected} unique callee phone numbers connected at least once
+        (of ${uniqueCallees} unique callees dialed).
+        <strong>The Zoom export masks last-4 digits</strong> of callee phone numbers (e.g. <code>+150****9596</code>),
+        so we cannot link these calls to specific HubSpot companies until we fetch HubSpot contact
+        phone numbers via Composio MCP. <strong>Plan B in progress.</strong>
+      </div>
+      <p class="muted small">Note: All 245 calls are from the heber@minyn.link extension (800) — the main company line, not a per-SDR phone system. Calls cannot be attributed to steven vs. miguel vs. anyone else from the Zoom data alone.</p>
     `;
   }
 
@@ -702,6 +971,9 @@
     renderMarketing(kpis.marketing || {});
     renderSales(kpis.sales || {});
     renderPipeline(kpis.pipeline || {});          // NEW in v3
+    renderOutreachByPerson(kpis.outreach_by_person || {});  // NEW v3.1
+    renderPhonePerCompany(kpis.phone_per_company || {});     // NEW v3.1
+    renderPhoneCall(kpis.phone_call || {});       // NEW in v3.5
     renderFunnelMotion(kpis.funnel_motion || {});   // NEW in v2
     renderOutreach(kpis.outreach || {});            // NEW in v2
     renderEngagement(kpis.engagement || {});        // NEW in v2

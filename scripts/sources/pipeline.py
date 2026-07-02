@@ -79,6 +79,26 @@ def collect() -> dict:
     stages = Counter(r["inferred_stage"] for r in rows)
     total = len(rows)
 
+    # Per-person outreach counts (v3.1: who did what)
+    by_person = {
+        "steven": {
+            "emailed":    sum(1 for r in rows if r.get("emailed_by_steven") == "y"),
+            "drafted":    sum(1 for r in rows if r.get("drafted_by_steven") == "y"),
+            "called":     sum(1 for r in rows if r.get("called_by_steven") == "y"),
+            "total_touched": sum(1 for r in rows
+                                 if r.get("emailed_by_steven") == "y"
+                                 or r.get("drafted_by_steven") == "y"
+                                 or r.get("called_by_steven") == "y"),
+        },
+        "heber": {
+            "emailed":    sum(1 for r in rows if r.get("emailed_by_heber") == "y"),
+            "drafted":    sum(1 for r in rows if r.get("drafted_by_heber") == "y"),
+            "total_touched": sum(1 for r in rows
+                                if r.get("emailed_by_heber") == "y"
+                                or r.get("drafted_by_heber") == "y"),
+        },
+    }
+
     # Per-batch counts (for the weekly sparkline)
     batches = Counter(r["source_batch"] for r in rows)
 
@@ -142,6 +162,7 @@ def collect() -> dict:
         {
             "total": total,
             "stages": dict(stages),
+            "by_person": by_person,
             "with_contact": with_contact,
             "with_note": with_note,
             "unworked": unworked,

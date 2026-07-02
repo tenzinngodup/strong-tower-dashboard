@@ -69,17 +69,49 @@ The dashboard has **two completely separate lead universes**. Confusing them is 
 | Source | Universe | Status | What it tracks |
 |---|---|---|---|
 | `leads` + `leads_history` | **Legacy May 2026 Apollo outreach** (gyms, dental, fitness) | **PAUSED** since 2026-05-05 | 80 rows, last touched 57 days ago. The frozen-pipeline / stale-CSV alerts refer to this. |
-| `pipeline` | **Current June 2026 HubSpot B2B universe** (property managers, GCs, title, senior living) | **ACTIVE** | 244 companies uploaded in 5 batches (5/13 master, 6/12, 6/13, 6/17, 6/18). 64 drafts in Gmail, 0 sent. |
+| `pipeline` | **Current June 2026 HubSpot B2B universe** (property managers, GCs, title, senior living) | **ACTIVE** | 244 companies uploaded in 5 batches (5/13 master, 6/12, 6/13, 6/17, 6/18). **v3.1**: 95 contacted by steven, 145 noted, 4 drafted. |
+| `phone` (NEW v3.1) | **Per-company call attribution** | ACTIVE | 90 HubSpot companies matched to Zoom calls via E.164 normalization. 245 matched of 245 outbound (60% match). |
 | `gmail` | Tracks sent emails | Active | **The 73 sent in 14d are the LEGACY outreach, NOT the HubSpot pipeline.** Cross-validate with `hubspot_events` (also 73 emails) — same universe. |
 
-**Key numbers (as of 2026-07-02):**
+**Key numbers (as of 2026-07-02, v3.1):**
 - 244 companies in the HubSpot pipeline
-- 179 noted (researched, no draft), 60 drafted-not-sent, 4 contacted, 1 active, 0 lost
+- **Stage distribution (v3.1, 6-stage vocabulary):** 145 noted, 38 contacted_both (steven emailed+called), 33 contacted_call_only, 24 contacted_email_only, 4 drafted, 0 unworked
+- **Steven contacted 95 of 244 (39%)** — 62 emailed, 71 called, 59 drafted. **Heber contacted 0** (heber's drafts go to legacy list)
 - 64 drafts in Gmail (60 by steven, 4 by miguel), **0 sent to the HubSpot pipeline**
+- 245 outbound calls in 16 days, 213 connected (87% pick-up), 90 unique companies reached
 - 73 sent emails in 14d = legacy Apollo outreach (different universe)
 - 56 companies ready to draft (have a HubSpot note + a contact, no draft yet)
 
 **If the page says "0 new leads this week" but the legacy `leads/active.csv` has 45 rows:** that's correct. The 45 are the legacy universe; the 0 is the HubSpot pipeline (no new batches uploaded this week).
+
+### 2.6. v3.1 per-person attribution (Steven vs Heber)
+
+The dashboard v3.1 splits outreach by person. **Critical fact:** steven and heber operate on DIFFERENT lead universes for the most part:
+- Steven = SDR working the 244-company HubSpot B2B pipeline
+- Heber = manager; his drafts go to the legacy gym/dental list (paused May 2026)
+
+If the dashboard shows "steven 95 touched / heber 4 touched", that's correct: 95 unique HubSpot companies have evidence of steven reaching out, 4 have evidence of heber reaching out (and those 4 are noise — legacy companies re-uploaded to HubSpot).
+
+The "Phone — per company" section shows 90 unique HubSpot companies that received calls. All 245 calls are recorded as `is_steven_call=y` (per user statement that steven was the dialer), even though the Zoom line owner is `heber@minyn.link`. Both fields are kept honest in the source data.
+
+### 2.7. v3.2.1 phone match rate (60% → 82%)
+
+**v3.1 reported 60% match rate (147 calls, 90 companies). v3.2.1 corrects to 82% (201 calls, 132 companies).** The 22pp gap is two real issues:
+
+1. **51 of the 98 "unmatched" calls were to 06-18 batch companies** (churches, schools, medical centers, senior living) whose phone numbers are in `scripts/lead-intake-2026-06-18/inbound.csv` — never imported to HubSpot as contact records. `phone.py` now has a 2nd lookup tier that matches against this CSV before falling back to "unmatched".
+2. **17 of the 147 v3.1 "matches" were false positives** — Zoom auto-creates HubSpot contacts named `+150****7770 Auto Zoom Phone` for any number that receives a call. The v3.2.1 matcher filters these out by name pattern.
+
+After v3.2.1: **steven touched 143 of 244 (58%), 132 unique companies reached, 201 of 245 calls matched, 25% milestone hit by 2x.**
+
+**Action to take if you ever rebuild `phone.py`:** keep the 2-tier lookup (HubSpot contacts → `inbound.csv` fallback) and the auto-contact filter (`name.startswith('+')` OR `'Auto Zoom Phone' in name` OR `lifecyclestage == ''`).
+
+### 2.8. v3.2.1 Phone Activity section showing all 0s (column-name bug)
+
+**Symptom:** The Phone Activity card shows "245 dials / 0 connected / 0% rate / 0m talk time / 0s avg" — plausible-looking, totally wrong. The "Phone — per company" section (which reads a different file) shows correct numbers.
+
+**Cause:** `scripts/sources/phone_call.py` reads columns `result`/`duration`/`date` (the original Zoom export names). The normalized `leads/phone_call_log.csv` uses prefixed names `call_result`/`call_duration`/`call_date`. The source runs without error, returns 245 rows, and silently emits zeros for every aggregate. Pitfall #32 in `skills/executive-dashboard/SKILL.md`.
+
+**Fix:** `head -1 leads/phone_call_log.csv` to confirm the actual column names, then patch the source to match. Always do this BEFORE assuming the rendered page is right.
 
 ## 3. The page is broken (deploy error)
 
@@ -148,6 +180,20 @@ hermes cron pause 1223b798d21f
 ```bash
 hermes cron edit 1223b798d21f --schedule "0 15 * * 1"  # 8am Pacific during DST
 ```
+
+**⚠️ CRITICAL: The cron runs `ingest.py` but does NOT push to CF Pages.** The cron job writes `data/kpis.json` locally and then ends. The dashboard only updates when someone manually runs `npx wrangler pages deploy public` (or when GitHub auto-deploy is wired — see §7). As of v3.2.1, there is NO automatic dashboard refresh.
+
+**The three manual steps to actually refresh the dashboard:**
+```bash
+# 1. Pull the new Zoom CSV into leads/phone_call_log.csv
+# 2. Run the ingest
+cd /opt/data/profiles/strong-tower/workspace/strong-tower-dashboard
+python3 scripts/ingest.py
+# 3. Deploy to CF Pages
+npx --yes wrangler pages deploy public --project-name=strong-tower-dashboard
+```
+
+**To get true "freshes like everyday" automation:** wire §7 (GitHub auto-deploy) AND change the cron schedule. Then a push to `main` after the cron run will trigger CF Pages to rebuild from `data/kpis.json`. Without that, the cron is a no-op for the live page.
 
 ## 6. Rotating the GitHub token (for git push, optional)
 

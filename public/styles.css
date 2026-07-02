@@ -460,6 +460,28 @@ footer .small { font-size: 11px; margin-top: 4px; }
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 .fm-weeks .muted { font-size: 11px; margin-right: 6px; }
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.data-table th, .data-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.data-table th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.data-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table .small { font-size: 12px; color: #6b7280; }
+.data-table tr:hover { background: #f9fafb; }
 details summary {
   cursor: pointer;
   color: var(--c-muted);
